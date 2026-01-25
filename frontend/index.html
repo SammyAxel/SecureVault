@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SecureVault - End-to-End Encrypted Storage</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+    </style>
+</head>
+
+<body class="bg-slate-900 text-slate-200 min-h-screen flex flex-col">
+
+    <!-- Auth View -->
+    <div id="auth-view" class="flex-1 flex flex-col items-center justify-center p-4">
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-blue-500 mb-2">SecureVault</h1>
+            <p class="text-slate-400">End-to-End Encrypted Storage</p>
+        </div>
+
+        <div class="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-slate-700">
+            <h2 class="text-2xl font-semibold text-white mb-6">Login / Register</h2>
+
+            <div class="space-y-4">
+                <div>
+                    <input type="text" id="username-input" placeholder="Username"
+                        class="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-white placeholder-slate-500 transition-all">
+                </div>
+
+                <div class="flex gap-4 pt-2">
+                    <button id="btn-register"
+                        class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium transition-colors shadow-lg shadow-blue-500/20">
+                        Register
+                    </button>
+                    <button id="btn-login"
+                        class="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-medium transition-colors border border-slate-600">
+                        Login
+                    </button>
+                </div>
+            </div>
+
+            <div class="mt-8 pt-6 border-t border-slate-700">
+                <p class="text-sm text-slate-400 mb-3">Or login with Key File:</p>
+                <div class="flex items-center gap-3">
+                    <label
+                        class="cursor-pointer bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 px-4 py-2 rounded-lg text-sm font-medium transition-colors border border-blue-500/20">
+                        Browse...
+                        <input type="file" id="key-file-input" class="hidden" accept=".json">
+                    </label>
+                    <span id="auth-status" class="text-sm text-slate-500 italic truncate"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard View -->
+    <div id="dashboard-view" class="hidden flex-1 flex flex-col w-full max-w-4xl mx-auto p-4">
+        <!-- Header -->
+        <header class="flex justify-between items-center py-6 mb-6 border-b border-slate-800">
+            <div>
+                <h2 class="text-2xl font-bold text-white">Welcome, <span id="current-user"
+                        class="text-blue-500">User</span></h2>
+                <div class="mt-2 w-64">
+                    <div class="flex justify-between text-xs text-slate-400 mb-1">
+                        <span>Storage Usage</span>
+                        <span id="quota-text">0 / 100 MB</span>
+                    </div>
+                    <div class="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
+                        <div id="quota-bar" class="bg-blue-500 h-2.5 rounded-full transition-all duration-300"
+                            style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="flex items-center">
+                <button id="btn-admin"
+                    class="hidden bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 px-4 py-2 rounded-lg text-sm font-medium transition-colors border border-purple-500/20 mr-2">
+                    Admin Panel
+                </button>
+                <button id="btn-logout"
+                    class="bg-red-500/10 hover:bg-red-500/20 text-red-400 px-4 py-2 rounded-lg text-sm font-medium transition-colors border border-red-500/20">
+                    Logout
+                </button>
+            </div>
+        </header>
+
+        <!-- Tabs -->
+        <div class="flex border-b border-slate-700 mb-6">
+            <button id="tab-files" class="px-6 py-3 text-blue-600 border-b-2 border-blue-600 font-medium">My
+                Files</button>
+            <button id="tab-shared"
+                class="px-6 py-3 text-gray-500 hover:text-gray-300 transition-colors font-medium">Shared With
+                Me</button>
+            <button id="tab-manage"
+                class="px-6 py-3 text-gray-500 hover:text-gray-300 transition-colors font-medium">Manage
+                Shares</button>
+            <button id="tab-security"
+                class="px-6 py-3 text-gray-500 hover:text-gray-300 transition-colors font-medium">Security</button>
+        </div>
+
+        <!-- Content Area -->
+        <div class="flex-1 bg-slate-800/50 rounded-2xl border border-slate-700 p-6 min-h-[400px]">
+
+            <!-- My Files View -->
+            <div id="view-files">
+                <!-- Toolbar -->
+                <div class="flex justify-between items-center mb-6">
+                    <!-- Breadcrumbs -->
+                    <div id="breadcrumbs" class="flex items-center space-x-2 text-sm text-slate-400">
+                        <span class="hover:text-blue-400 cursor-pointer transition-colors" data-id="null">Home</span>
+                        <!-- Injected breadcrumbs -->
+                    </div>
+
+                    <button id="btn-create-folder"
+                        class="bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors border border-slate-600 flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path>
+                        </svg>
+                        New Folder
+                    </button>
+                </div>
+
+                <!-- Upload Area -->
+                <div id="drop-zone"
+                    class="border-2 border-dashed border-slate-600 rounded-xl p-8 text-center hover:border-blue-500 hover:bg-slate-800 transition-all cursor-pointer mb-8 group">
+                    <div
+                        class="w-12 h-12 bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:bg-blue-500/20 transition-colors">
+                        <svg class="w-6 h-6 text-slate-400 group-hover:text-blue-500" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12">
+                            </path>
+                        </svg>
+                    </div>
+                    <p class="text-slate-300 font-medium">Click to upload or drag and drop</p>
+                    <p class="text-slate-500 text-sm mt-1">Any file type supported</p>
+                    <input type="file" id="file-input" class="hidden">
+                </div>
+
+                <!-- Progress Bar -->
+                <div id="upload-progress"
+                    class="hidden mb-6 text-sm text-blue-400 font-medium bg-blue-500/10 p-3 rounded-lg border border-blue-500/20 text-center">
+                </div>
+
+                <!-- File List -->
+                <ul id="file-list" class="space-y-3">
+                    <!-- Files injected here -->
+                </ul>
+            </div>
+
+            <!-- Shared With Me View -->
+            <div id="view-shared" class="hidden">
+                <h3 class="text-xl font-bold text-white mb-6">Shared With Me</h3>
+                <ul id="shared-list" class="space-y-3">
+                    <!-- Shared files injected here -->
+                </ul>
+            </div>
+
+            <!-- Manage Shares View -->
+            <div id="view-manage" class="hidden space-y-8">
+                <div>
+                    <h3 class="text-xl font-bold text-white mb-4">Public Links</h3>
+                    <ul id="manage-public-list" class="space-y-3"></ul>
+                </div>
+                <div>
+                    <h3 class="text-xl font-bold text-white mb-4">User Shares</h3>
+                    <ul id="manage-user-list" class="space-y-3"></ul>
+                </div>
+            </div>
+
+            <!-- Security View -->
+            <div id="view-security" class="hidden space-y-8">
+                <!-- 2FA Section -->
+                <div class="bg-slate-800 rounded-xl border border-slate-700 p-6">
+                    <h3 class="text-xl font-bold text-white mb-4">Two-Factor Authentication (2FA)</h3>
+
+                    <!-- State: 2FA Disabled -->
+                    <div id="2fa-disabled">
+                        <p class="text-gray-400 mb-4">Protect your account with an extra layer of security.</p>
+                        <button id="btn-setup-2fa"
+                            class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors">
+                            Setup 2FA
+                        </button>
+                    </div>
+
+                    <!-- State: 2FA Setup (QR Code) -->
+                    <div id="2fa-setup" class="hidden">
+                        <p class="text-gray-400 mb-4">Scan this QR code with your authenticator app (Google
+                            Authenticator, Authy, etc.)</p>
+                        <div class="bg-white p-4 rounded-lg inline-block mb-4">
+                            <img id="qr-code-img" class="w-64" alt="2FA QR Code">
+                        </div>
+                        <p class="text-sm text-gray-500 mb-4 font-mono bg-slate-900 p-2 rounded break-all">Secret:
+                            <span id="totp-secret"></span>
+                        </p>
+
+                        <div class="flex gap-2 max-w-xs">
+                            <input type="text" id="2fa-code-input" placeholder="Enter 6-digit code" maxlength="6"
+                                class="flex-1 px-4 py-2 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-white text-center tracking-widest">
+                            <button id="btn-enable-2fa"
+                                class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors">
+                                Enable
+                            </button>
+                        </div>
+                        <button id="btn-cancel-2fa" class="mt-4 text-sm text-gray-400 hover:text-white underline">Cancel
+                            Setup</button>
+                    </div>
+
+                    <!-- State: 2FA Enabled -->
+                    <div id="2fa-enabled" class="hidden">
+                        <div class="flex items-center text-green-500 mb-4">
+                            <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <span class="font-medium">2FA is enabled</span>
+                        </div>
+                        <p class="text-gray-400 mb-4">Your account is protected with two-factor authentication.</p>
+
+                        <div id="backup-codes-display"
+                            class="hidden mb-6 bg-slate-900 p-4 rounded-lg border border-slate-700">
+                            <p class="text-yellow-500 font-bold mb-2">SAVE THESE BACKUP CODES!</p>
+                            <p class="text-sm text-gray-400 mb-4">If you lose your authenticator device, you can use
+                                these codes to login. Each code can only be used once.</p>
+                            <div id="backup-codes-list"
+                                class="grid grid-cols-2 gap-2 font-mono text-sm text-white mb-4">
+                                <!-- Codes injected here -->
+                            </div>
+                            <button id="btn-close-backup" class="text-sm text-blue-400 hover:text-blue-300 underline">I
+                                have saved these
+                                codes</button>
+                        </div>
+
+                        <div class="mt-4">
+                            <label class="block text-sm text-gray-400 mb-2">Enter code to disable 2FA:</label>
+                            <div class="flex gap-2 max-w-xs">
+                                <input type="text" id="2fa-disable-code" placeholder="000000" maxlength="6"
+                                    class="flex-1 px-4 py-2 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-red-500 focus:outline-none text-white text-center tracking-widest">
+                            </div>
+                            <button id="btn-disable-2fa"
+                                class="mt-4 bg-red-500/10 hover:bg-red-500/20 text-red-400 px-4 py-2 rounded-lg font-medium transition-colors border border-red-500/20">
+                                Disable 2FA
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active Sessions Section -->
+                <div class="bg-slate-800 rounded-xl border border-slate-700 p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xl font-bold text-white">Active Sessions</h3>
+                        <button id="btn-logout-all"
+                            class="text-sm text-red-400 hover:text-red-300 hover:underline">Logout All Other
+                            Devices</button>
+                    </div>
+                    <ul id="sessions-list" class="space-y-3">
+                        <!-- Sessions injected here -->
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Admin View -->
+            <div id="view-admin" class="hidden space-y-8">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-slate-800 p-6 rounded-xl border border-slate-700">
+                        <h4 class="text-slate-400 text-sm font-medium mb-2">Total Users</h4>
+                        <p id="admin-total-users" class="text-3xl font-bold text-white">-</p>
+                    </div>
+                    <div class="bg-slate-800 p-6 rounded-xl border border-slate-700">
+                        <h4 class="text-slate-400 text-sm font-medium mb-2">Total Storage</h4>
+                        <p id="admin-total-storage" class="text-3xl font-bold text-blue-400">-</p>
+                    </div>
+                    <div class="bg-slate-800 p-6 rounded-xl border border-slate-700">
+                        <h4 class="text-slate-400 text-sm font-medium mb-2">Active Sessions</h4>
+                        <p id="admin-active-sessions" class="text-3xl font-bold text-green-400">-</p>
+                    </div>
+                </div>
+
+                <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                    <div class="p-6 border-b border-slate-700">
+                        <h3 class="text-xl font-bold text-white">User Management</h3>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm text-slate-400">
+                            <thead class="bg-slate-900/50 text-slate-200 uppercase font-medium">
+                                <tr>
+                                    <th class="px-6 py-4">Username</th>
+                                    <th class="px-6 py-4">Storage</th>
+                                    <th class="px-6 py-4">Files</th>
+                                    <th class="px-6 py-4">Role</th>
+                                    <th class="px-6 py-4 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-user-list" class="divide-y divide-slate-700">
+                                <!-- Users injected here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Preview Modal -->
+    <div id="preview-modal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4">
+        <div
+            class="bg-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl border border-slate-700">
+            <div class="flex justify-between items-center p-4 border-b border-slate-700">
+                <h3 id="preview-title" class="text-xl font-bold text-white truncate">File Preview</h3>
+                <button id="close-preview" class="text-gray-400 hover:text-white text-2xl font-bold">&times;</button>
+            </div>
+            <div id="preview-container" class="p-6 overflow-auto flex-1 flex flex-col items-center">
+                <!-- Content injected here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirm-modal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-slate-800 rounded-2xl w-full max-w-md shadow-2xl border border-slate-700 p-6">
+            <h3 class="text-xl font-bold text-white mb-4">Confirm Action</h3>
+            <p id="confirm-message" class="text-gray-300 mb-6">Are you sure?</p>
+            <div class="flex justify-end gap-3">
+                <button id="btn-confirm-cancel"
+                    class="px-4 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700 transition-colors">
+                    Cancel
+                </button>
+                <button id="btn-confirm-yes"
+                    class="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium transition-colors">
+                    Delete
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2FA Input Modal (Login) -->
+    <div id="2fa-input-modal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-slate-800 rounded-2xl w-full max-w-sm shadow-2xl border border-slate-700 p-6">
+            <h3 class="text-xl font-bold text-white mb-4">Two-Factor Authentication</h3>
+            <p class="text-gray-300 mb-4 text-sm">Enter the 6-digit code from your authenticator app.</p>
+
+            <input type="text" id="login-2fa-code" maxlength="6" placeholder="000000"
+                class="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-white text-center text-xl tracking-widest mb-6">
+
+            <div class="flex justify-end gap-3">
+                <button id="btn-2fa-cancel"
+                    class="px-4 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700 transition-colors">
+                    Cancel
+                </button>
+                <button id="btn-2fa-verify"
+                    class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors">
+                    Verify
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2FA Setup Reminder Modal -->
+    <div id="2fa-reminder-modal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-slate-800 rounded-2xl w-full max-w-md shadow-2xl border border-slate-700 p-6">
+            <div class="flex items-start gap-4">
+                <div class="bg-blue-500/20 p-3 rounded-full">
+                    <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z">
+                        </path>
+                    </svg>
+                </div>
+                <div>
+                    <h3 class="text-xl font-bold text-white mb-2">Secure Your Account</h3>
+                    <p class="text-gray-300 text-sm mb-6">Enabling Two-Factor Authentication (2FA) adds an extra layer
+                        of security to your files. We highly recommend setting it up.</p>
+
+                    <div class="flex gap-3">
+                        <button id="btn-remind-later"
+                            class="px-4 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700 transition-colors text-sm">
+                            Maybe Later
+                        </button>
+                        <button id="btn-setup-now"
+                            class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors text-sm">
+                            Setup 2FA Now
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm"></div>
+
+    </div>
+
+    <!-- Create Folder Modal -->
+    <div id="create-folder-modal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-slate-800 rounded-2xl w-full max-w-sm shadow-2xl border border-slate-700 p-6">
+            <h3 class="text-xl font-bold text-white mb-4">Create New Folder</h3>
+            
+            <input type="text" id="new-folder-name" placeholder="Folder Name"
+                class="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-white mb-6">
+
+            <div class="flex justify-end gap-3">
+                <button id="btn-folder-cancel"
+                    class="px-4 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700 transition-colors">
+                    Cancel
+                </button>
+                <button id="btn-folder-create"
+                    class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors">
+                    Create
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Move File Modal -->
+    <div id="move-file-modal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-slate-800 rounded-2xl w-full max-w-md shadow-2xl border border-slate-700 p-6">
+            <h3 class="text-xl font-bold text-white mb-4">Move File to Folder</h3>
+            
+            <p id="move-file-name" class="text-gray-300 mb-4 text-sm"></p>
+            
+            <div class="mb-4">
+                <label class="block text-sm text-gray-400 mb-2">Select Destination Folder:</label>
+                <select id="move-folder-select"
+                    class="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-white">
+                    <option value="null">Root (Home)</option>
+                    <!-- Folders injected here -->
+                </select>
+            </div>
+
+            <div class="flex justify-end gap-3">
+                <button id="btn-move-cancel"
+                    class="px-4 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700 transition-colors">
+                    Cancel
+                </button>
+                <button id="btn-move-confirm"
+                    class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors">
+                    Move
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rename Folder Modal -->
+    <div id="rename-folder-modal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-slate-800 rounded-2xl w-full max-w-sm shadow-2xl border border-slate-700 p-6">
+            <h3 class="text-xl font-bold text-white mb-4">Rename Folder</h3>
+            
+            <p id="rename-folder-current-name" class="text-gray-300 mb-4 text-sm"></p>
+            
+            <div class="mb-6">
+                <label class="block text-sm text-gray-400 mb-2">New Folder Name:</label>
+                <input type="text" id="rename-folder-input" placeholder="Folder Name"
+                    class="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-white">
+            </div>
+
+            <div class="flex justify-end gap-3">
+                <button id="btn-rename-cancel"
+                    class="px-4 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700 transition-colors">
+                    Cancel
+                </button>
+                <button id="btn-rename-confirm"
+                    class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors">
+                    Rename
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Share Folder Modal -->
+    <div id="share-folder-modal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-slate-800 rounded-2xl w-full max-w-sm shadow-2xl border border-slate-700 p-6">
+            <h3 class="text-xl font-bold text-white mb-4">Share Folder</h3>
+            
+            <p id="share-folder-name" class="text-gray-300 mb-4 text-sm"></p>
+            
+            <div class="mb-6">
+                <label class="block text-sm text-gray-400 mb-2">Enter username to share with:</label>
+                <input type="text" id="share-folder-username" placeholder="Username"
+                    class="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-white">
+            </div>
+
+            <div class="flex justify-end gap-3">
+                <button id="btn-share-folder-cancel"
+                    class="px-4 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700 transition-colors">
+                    Cancel
+                </button>
+                <button id="btn-share-folder-confirm"
+                    class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white font-medium transition-colors">
+                    Share
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Share File Modal -->
+    <div id="share-file-modal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-slate-800 rounded-2xl w-full max-w-sm shadow-2xl border border-slate-700 p-6">
+            <h3 class="text-xl font-bold text-white mb-4">Share File</h3>
+            
+            <p id="share-file-name" class="text-gray-300 mb-4 text-sm"></p>
+            
+            <div class="mb-6">
+                <label class="block text-sm text-gray-400 mb-2">Enter username to share with:</label>
+                <input type="text" id="share-file-username" placeholder="Username"
+                    class="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-white">
+            </div>
+
+            <div class="flex justify-end gap-3">
+                <button id="btn-share-file-cancel"
+                    class="px-4 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700 transition-colors">
+                    Cancel
+                </button>
+                <button id="btn-share-file-confirm"
+                    class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white font-medium transition-colors">
+                    Share
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Public Link Modal -->
+    <div id="public-link-modal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-slate-800 rounded-2xl w-full max-w-md shadow-2xl border border-slate-700 p-6">
+            <h3 class="text-xl font-bold text-white mb-4">Create Public Link</h3>
+            
+            <p id="public-link-file-name" class="text-gray-300 mb-4 text-sm"></p>
+            
+            <div class="mb-4">
+                <label class="block text-sm text-gray-400 mb-2">Duration (hours):</label>
+                <input type="number" id="public-link-duration" placeholder="1" value="1" min="1"
+                    class="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-white">
+            </div>
+
+            <div class="mb-6">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="public-link-one-time" class="w-4 h-4 text-blue-600 bg-slate-900 border-slate-600 rounded focus:ring-blue-500">
+                    <span class="text-sm text-gray-300">One-time access (expires after 1 use)</span>
+                </label>
+            </div>
+
+            <div id="public-link-result" class="hidden mb-4 p-3 bg-slate-900 rounded border border-slate-700">
+                <label class="block text-sm text-gray-400 mb-2">Public Link:</label>
+                <input type="text" id="public-link-url" readonly
+                    class="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-white text-sm">
+                <button id="btn-copy-link" class="mt-2 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded">
+                    Copy Link
+                </button>
+            </div>
+
+            <div class="flex justify-end gap-3">
+                <button id="btn-public-link-cancel"
+                    class="px-4 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700 transition-colors">
+                    Cancel
+                </button>
+                <button id="btn-public-link-create"
+                    class="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-medium transition-colors">
+                    Create Link
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rename File Modal (reuse rename folder modal with different ID) -->
+    <div id="rename-file-modal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-slate-800 rounded-2xl w-full max-w-sm shadow-2xl border border-slate-700 p-6">
+            <h3 class="text-xl font-bold text-white mb-4">Rename File</h3>
+            
+            <p id="rename-file-current-name" class="text-gray-300 mb-4 text-sm"></p>
+            
+            <div class="mb-6">
+                <label class="block text-sm text-gray-400 mb-2">New File Name:</label>
+                <input type="text" id="rename-file-input" placeholder="File Name"
+                    class="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-white">
+            </div>
+
+            <div class="flex justify-end gap-3">
+                <button id="btn-rename-file-cancel"
+                    class="px-4 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700 transition-colors">
+                    Cancel
+                </button>
+                <button id="btn-rename-file-confirm"
+                    class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors">
+                    Rename
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm"></div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

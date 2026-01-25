@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Database
+app.db
+*.sqlite3
+
+# User Data
+uploads/
+*_keys.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.pem
+
+app_v2.db

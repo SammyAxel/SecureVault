@@ -1,0 +1,6 @@
+flask
+flask-sqlalchemy
+cryptography
+pyotp
+qrcode[pil]
+flask-limiter
