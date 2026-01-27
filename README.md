@@ -1,57 +1,183 @@
-# SecureVault: End-to-End Encrypted File Sharing
+# SecureVault v2
 
-This project is a Proof-of-Concept (PoC) for a secure, self-hosted file sharing system with **Zero-Knowledge Architecture**. The server stores files but cannot decrypt them. All encryption happens in the browser.
-
-## Features (Thesis Points)
-- **End-to-End Encryption (E2EE)**: Files are encrypted with AES-GCM (256-bit) before upload. Keys are wrapped with RSA-OAEP.
-- **Zero-Knowledge**: Server only sees encrypted blobs. It has no access to user data.
-- **Dual-Key Cryptography**:
-  - **Identity**: ECDSA (P-256) for passwordless authentication.
-  - **Encryption**: RSA-OAEP for secure key exchange.
-- **Advanced Security**:
-  - **Two-Factor Authentication (2FA)**: TOTP-based (Google Authenticator, Authy). Mandatory for enabled users.
-  - **Session Management**: Active session tracking, remote logout, and auto-logout on revocation.
-  - **Security Hardening**: Rate limiting (anti-brute-force), Secure Headers (HSTS, CSP, XSS Protection), and XSS-safe UI rendering.
-- **Storage Quota**: Enforced 100MB storage limit per user.
-- **File Previews**: Secure in-browser preview for Images, Videos, Audio, PDFs, and Code/Text files.
-- **Self-Hosted**: Dockerized for easy deployment with `gunicorn` and SSL support.
+End-to-End Encrypted File Sharing — Migrated to **Fastify + SolidJS + Drizzle**
 
 ## Tech Stack
-- **Backend**: Python (Flask), SQLAlchemy (SQLite), Flask-Limiter.
-- **Frontend**: Vanilla JS, Web Crypto API (Native Browser Standards), TailwindCSS.
-- **Container**: Docker & Docker Compose.
 
-## How to Run
+| Layer | Technology |
+|-------|------------|
+| **Backend** | Fastify (Node.js) + TypeScript |
+| **Frontend** | SolidJS + TypeScript + TailwindCSS |
+| **Database** | SQLite + Drizzle ORM |
+| **Storage** | Filesystem (organized by user/date) |
+| **Encryption** | Web Crypto API (AES-GCM, RSA-OAEP, ECDSA) |
 
-### Option 1: Docker (Recommended)
-1. Install Docker and Docker Compose.
-2. Run:
-   ```bash
-   docker-compose up --build
-   ```
-3. Open `http://localhost:5000`.
+## Project Structure
 
-### Option 2: Manual (Dev)
-1. Install Python 3.11+.
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Run server:
-   ```bash
-   python server.py
-   ```
-4. Open `http://localhost:5000`.
+```
+SecureVault/
+├── backend/
+│   ├── src/
+│   │   ├── db/           # Drizzle schema & connection
+│   │   ├── lib/          # Utilities (storage, crypto)
+│   │   ├── middleware/   # Auth middleware
+│   │   ├── routes/       # API routes
+│   │   └── server.ts     # Fastify app
+│   ├── drizzle.config.ts
+│   └── package.json
+│
+├── frontend/
+│   ├── src/
+│   │   ├── components/   # SolidJS components
+│   │   ├── lib/          # API client, crypto utils
+│   │   ├── stores/       # State management
+│   │   └── App.tsx
+│   ├── vite.config.ts
+│   └── package.json
+│
+├── docker-compose.yml
+├── Dockerfile
+└── package.json
+```
 
-## Usage Flow
-1. **Register**: Enter a username. The browser generates keys and sends public keys to the server. Download your `keys.json` (Critical!).
-2. **Login**: Authenticate using your private key (from `keys.json` or browser memory).
-3. **2FA Setup**: Enable 2FA in the Security tab for extra protection.
-4. **Upload**: Drag & drop a file. It is encrypted locally and uploaded.
-5. **Share**: Share files securely with other users (using their public keys) or via public links.
+---
 
-## Thesis Implementation Details
-- **Key Generation**: `window.crypto.subtle.generateKey`
-- **Encryption**: `AES-GCM` (256-bit) for content, `RSA-OAEP` for key wrapping.
-- **Auth**: Challenge-Response protocol using ECDSA signatures.
-- **Defense**: Rate Limiting, CSP, HSTS, XSS Sanitization.
+## 🚀 Quick Start (Development)
+
+### Prerequisites
+
+- **Node.js** v20+ ([Download](https://nodejs.org/))
+- **npm** v10+ (included with Node.js)
+
+### Step 1: Install Dependencies
+
+```bash
+# Install root dependencies (concurrently)
+npm install
+
+# Install backend dependencies
+cd backend && npm install && cd ..
+
+# Install frontend dependencies
+cd frontend && npm install && cd ..
+```
+
+### Step 2: Setup Database
+
+```bash
+# Generate Drizzle schema
+npm run db:generate
+
+# Run database migrations
+npm run db:migrate
+```
+
+### Step 3: Start Development Servers
+
+```bash
+npm run dev
+```
+
+This starts **both** servers concurrently:
+- **Backend API**: http://localhost:3000
+- **Frontend Dev**: http://localhost:5173 (auto-proxies API requests)
+
+### Production (Docker)
+
+```bash
+docker-compose up --build
+```
+
+App available at http://localhost:3000
+
+## Features
+
+- ✅ **End-to-End Encryption** — Files encrypted client-side with AES-256-GCM
+- ✅ **Zero-Knowledge** — Server only stores encrypted blobs
+- ✅ **Passwordless Auth** — ECDSA challenge-response authentication
+- ✅ **2FA Support** — TOTP-based two-factor authentication
+- ✅ **File Sharing** — Share with users or via public links
+- ✅ **Folder Support** — Organize files in folders
+- ✅ **Trash/Restore** — Soft delete with recovery
+- ✅ **Storage Quotas** — Per-user storage limits
+- ✅ **Rate Limiting** — Anti-brute-force protection
+- ✅ **Security Headers** — HSTS, CSP, XSS protection
+
+## API Endpoints
+
+### Auth
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/register` | Create account |
+| POST | `/api/auth/challenge` | Get login challenge |
+| POST | `/api/auth/verify` | Verify signature + login |
+| POST | `/api/logout` | End session |
+| GET | `/api/me` | Get current user |
+| POST | `/api/auth/2fa/setup` | Setup 2FA |
+| POST | `/api/auth/2fa/confirm` | Confirm 2FA |
+| POST | `/api/auth/2fa/disable` | Disable 2FA |
+
+### Files
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/files` | List files |
+| POST | `/api/upload` | Upload file |
+| POST | `/api/folders` | Create folder |
+| GET | `/api/files/:id/download` | Download file |
+| DELETE | `/api/files/:id` | Delete file |
+| POST | `/api/files/:id/restore` | Restore from trash |
+| GET | `/api/trash` | List trash |
+
+### Sharing
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/share` | Share with user |
+| GET | `/api/shared-with-me` | Files shared with me |
+| POST | `/api/share/public` | Create public link |
+| GET | `/api/public/:token` | Access public share |
+| DELETE | `/api/share/public/:token` | Delete public link |
+
+## Database Commands
+
+```bash
+# Generate migrations from schema changes
+npm run db:generate
+
+# Apply migrations
+npm run db:migrate
+
+# Open Drizzle Studio (DB browser)
+npm run db:studio
+```
+
+## File Storage
+
+Files are stored in organized directories:
+
+```
+uploads/
+├── {user_id}/
+│   ├── {YYYY-MM}/
+│   │   ├── {random}.enc
+│   │   └── {random}.enc
+```
+
+## Security Notes
+
+1. **Private keys never leave the browser** — Generated and stored client-side
+2. **Zero-knowledge architecture** — Server cannot decrypt files
+3. **Challenge-response auth** — No passwords stored
+4. **Rate limiting** — Prevents brute-force attacks
+5. **Security headers** — CSP, HSTS, X-XSS-Protection
+
+## Migration from v1
+
+The v2 codebase is a complete rewrite. To migrate:
+
+1. Export data from v1 (if needed)
+2. Run v2 with fresh database
+3. Re-upload files (they'll be re-encrypted)
+
+## License
+
+MIT

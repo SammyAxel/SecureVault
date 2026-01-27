@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1f2937;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+/* Drag and drop zone */
+.drop-zone {
+  @apply border-2 border-dashed border-gray-600 rounded-xl p-8 text-center transition-colors;
+}
+
+.drop-zone.dragover {
+  @apply border-primary-500 bg-primary-500/10;
+}
+
+/* File list animations */
+.file-item {
+  @apply transition-all duration-200;
+}
+
+.file-item:hover {
+  @apply bg-gray-800/50;
+}
+
+/* Draggable file cursor */
+.file-item[draggable="true"] {
+  cursor: grab;
+}
+
+.file-item[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+/* Custom checkbox styling */
+input[type="checkbox"] {
+  @apply accent-primary-500;
+}
+
+/* Toast animations */
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out;
+}

@@ -1,56 +1,65 @@
-# Use official Python runtime as a parent image
-FROM python:3.11-slim
+# ============================================
+# SecureVault v2 - Production Dockerfile
+# Multi-stage build for optimized image
+# ============================================
 
-LABEL org.opencontainers.image.authors="maintainer@example.com"
+# Build stage - Backend
+FROM node:20-alpine AS backend-builder
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV LANG=C.UTF-8
+WORKDIR /app/backend
+COPY backend/package*.json ./
+RUN npm ci --only=production && npm cache clean --force
+COPY backend/ ./
+RUN npm run build
 
-# Install build-time dependencies required for some packages (cryptography, etc.)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    gcc \
-    libssl-dev \
-    libffi-dev \
-    ca-certificates \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Build stage - Frontend  
+FROM node:20-alpine AS frontend-builder
 
-# Create non-root user and directories
-RUN useradd -m -d /home/app -s /bin/bash app && \
-    mkdir -p /app/uploads /app/instance && chown -R app:app /app
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm ci && npm cache clean --force
+COPY frontend/ ./
+RUN npm run build
+
+# Production stage
+FROM node:20-alpine AS production
+
+# Security: create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S securevault -u 1001
 
 WORKDIR /app
 
-# Copy and install Python dependencies
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir gunicorn
+# Copy backend build
+COPY --from=backend-builder --chown=securevault:nodejs /app/backend/dist ./dist
+COPY --from=backend-builder --chown=securevault:nodejs /app/backend/package*.json ./
 
-# Copy project files
-COPY . .
+# Install only production dependencies
+RUN npm ci --only=production && npm cache clean --force
 
-# Generate certificates at build-time so image contains valid certs (best-effort)
-# Note: still safe to generate at startup if certs are missing (start.sh checks)
-RUN python generate_cert.py || (echo "Certificate generation at build failed"; exit 0)
+# Copy frontend build
+COPY --from=frontend-builder --chown=securevault:nodejs /app/frontend/dist ./frontend/dist
 
-# Make start script executable
-RUN chmod +x start.sh
-
-# Drop build deps to keep image small
-RUN apt-get purge -y --auto-remove build-essential gcc && rm -rf /var/lib/apt/lists/* || true
+# Create data directories with correct permissions
+RUN mkdir -p /app/data /app/uploads && \
+    chown -R securevault:nodejs /app/data /app/uploads
 
 # Switch to non-root user
-USER app
+USER securevault
+
+# Environment variables
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV DATABASE_URL=/app/data/securevault.db
+ENV STORAGE_PATH=/app/uploads
+ENV LOG_LEVEL=info
 
 # Expose port
-EXPOSE 5000
+EXPOSE 3000
 
-# Healthcheck (allow self-signed cert with --insecure)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=5 \
-  CMD curl -f --insecure https://localhost:5000/ || exit 1
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
 
-# Run with start script (start.sh handles cert generation at runtime if needed)
-CMD ["/bin/bash", "start.sh"]
+# Start server
+CMD ["node", "dist/server.js"]

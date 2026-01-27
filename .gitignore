@@ -1,25 +1,40 @@
-# Python
-__pycache__/
-*.pyc
-.venv/
-venv/
-env/
+# Dependencies
+node_modules/
+*/node_modules/
 
-# Database
-app.db
-*.sqlite3
+# Build outputs
+dist/
+*/dist/
 
-# User Data
+# Data files
+data/
 uploads/
-*_keys.json
+*.db
+*.db-wal
+*.db-shm
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # OS
 .DS_Store
 Thumbs.db
 
-# IDE
-.vscode/
-.idea/
-*.pem
+# Logs
+*.log
+npm-debug.log*
 
-app_v2.db
+# Drizzle
+drizzle/
+
+# Keys (never commit!)
+*_keys.json
+keys.json
