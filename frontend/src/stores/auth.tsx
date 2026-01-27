@@ -5,10 +5,13 @@ import { toast } from './toast';
 export interface User {
   id: number;
   username: string;
+  displayName?: string;
+  avatar?: string;
   isAdmin: boolean;
   storageUsed: number;
   storageQuota: number;
   totpEnabled: boolean;
+  createdAt?: string;
 }
 
 interface AuthContextValue {

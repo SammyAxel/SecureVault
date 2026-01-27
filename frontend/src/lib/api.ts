@@ -101,6 +101,9 @@ export async function getCurrentUser() {
       storageUsed: number;
       storageQuota: number;
       totpEnabled: boolean;
+      displayName?: string;
+      avatar?: string;
+      createdAt?: string;
     };
   }>('/me');
 }
@@ -112,6 +115,48 @@ export async function getUserPublicKey(username: string) {
     publicKey: string;
     encryptionPublicKey: string;
   }>(`/users/${username}/publickey`);
+}
+
+// ============ PROFILE ============
+
+export async function updateProfile(data: { displayName?: string; avatar?: string }) {
+  return request<{ ok: boolean }>('/profile', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export interface SessionInfo {
+  id: number;
+  deviceInfo?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  createdAt: string;
+  lastActive: string;
+  isCurrent: boolean;
+}
+
+export async function getSessions() {
+  return request<{ ok: boolean; sessions: SessionInfo[] }>('/sessions');
+}
+
+export async function revokeSession(id: number) {
+  return request<{ ok: boolean }>(`/sessions/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function revokeAllSessions() {
+  return request<{ ok: boolean }>('/sessions/revoke-all', {
+    method: 'POST',
+  });
+}
+
+export async function deleteAccount(confirmation: string) {
+  return request<{ ok: boolean }>('/account', {
+    method: 'DELETE',
+    body: JSON.stringify({ confirmation }),
+  });
 }
 
 // ============ 2FA ============
@@ -419,7 +464,7 @@ export async function getUserSessions(userId: number) {
   return request<{ ok: boolean; sessions: UserSession[] }>(`/admin/users/${userId}/sessions`);
 }
 
-export async function revokeSession(sessionId: number) {
+export async function adminRevokeSession(sessionId: number) {
   return request<{ ok: boolean }>(`/admin/sessions/${sessionId}`, {
     method: 'DELETE',
   });

@@ -138,7 +138,7 @@ export default function AdminDashboard() {
     if (!confirmed) return;
     
     try {
-      await api.revokeSession(sessionId);
+      await api.adminRevokeSession(sessionId);
       toast.success('Session revoked successfully');
       const targetUser = selectedUser();
       if (targetUser) {

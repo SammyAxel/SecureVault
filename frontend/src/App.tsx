@@ -3,7 +3,7 @@ import { AuthProvider, useAuth } from './stores/auth.jsx';
 import Login from './components/Login';
 import Register from './components/Register';
 import Dashboard from './components/Dashboard';
-import PublicShare from './components/PublicShare';
+import Profile from './components/Profile';
 import AdminDashboard from './components/AdminDashboard';
 import ToastContainer from './components/Toast';
 import ConfirmModal from './components/ConfirmModal';
@@ -31,23 +31,21 @@ function AppContent() {
   const [showRegister, setShowRegister] = createSignal(false);
   const { path, navigate } = useRoute();
   
-  // Check if we're on a public share page
-  const isPublicShare = () => path().startsWith('/share/');
-  
   // Check if we're on admin page
   const isAdminPage = () => path() === '/admin';
-
-  // If on public share page, render just that
-  if (isPublicShare()) {
-    return <PublicShare />;
-  }
+  
+  // Check if we're on profile page
+  const isProfilePage = () => path() === '/profile';
 
   return (
     <div class="min-h-screen bg-gray-900">
       {/* Header */}
       <header class="bg-gray-800 border-b border-gray-700">
         <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div class="flex items-center gap-3">
+          <div 
+            class="flex items-center gap-3 cursor-pointer"
+            onClick={() => navigate('/')}
+          >
             <div class="w-10 h-10 bg-primary-600 rounded-lg flex items-center justify-center">
               <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -75,7 +73,30 @@ function AppContent() {
                   {isAdminPage() ? 'Exit Admin' : 'Admin'}
                 </button>
               </Show>
-              <span class="text-gray-400">Welcome, <span class="text-white font-medium">{user()?.username}</span></span>
+              
+              {/* User menu with avatar */}
+              <button
+                onClick={() => navigate(isProfilePage() ? '/' : '/profile')}
+                class={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors ${
+                  isProfilePage() 
+                    ? 'bg-primary-600 text-white' 
+                    : 'hover:bg-gray-700'
+                }`}
+              >
+                <div class="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center overflow-hidden">
+                  <Show when={user()?.avatar} fallback={
+                    <span class="text-sm font-medium text-gray-300">
+                      {user()?.username?.charAt(0).toUpperCase()}
+                    </span>
+                  }>
+                    <img src={user()?.avatar} alt="Avatar" class="w-full h-full object-cover" />
+                  </Show>
+                </div>
+                <span class="text-gray-300">
+                  {user()?.displayName || user()?.username}
+                </span>
+              </button>
+              
               <button
                 onClick={() => logout()}
                 class="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded-lg text-sm"
@@ -103,9 +124,19 @@ function AppContent() {
               <Register onSwitchToLogin={() => setShowRegister(false)} />
             </Show>
           }>
-            {/* Admin Dashboard or User Dashboard */}
-            <Show when={isAdminPage() && user()?.isAdmin} fallback={<Dashboard />}>
+            {/* Profile Page */}
+            <Show when={isProfilePage()}>
+              <Profile onBack={() => navigate('/')} />
+            </Show>
+            
+            {/* Admin Dashboard */}
+            <Show when={isAdminPage() && user()?.isAdmin && !isProfilePage()}>
               <AdminDashboard />
+            </Show>
+            
+            {/* User Dashboard (default) */}
+            <Show when={!isAdminPage() && !isProfilePage()}>
+              <Dashboard />
             </Show>
           </Show>
         </Show>

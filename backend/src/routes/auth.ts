@@ -224,6 +224,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       user: {
         id: user.id,
         username: user.username,
+        displayName: user.displayName,
+        avatar: user.avatar,
         isAdmin: user.isAdmin,
         storageUsed: user.storageUsed,
         storageQuota: user.storageQuota,
@@ -330,5 +332,160 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       publicKey: user.publicKeyPem,
       encryptionPublicKey: user.encryptionPublicKeyPem,
     };
+  });
+
+  // ============ UPDATE PROFILE ============
+  app.put('/api/profile', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+    const user = request.user!;
+    const { displayName, avatar } = request.body as { displayName?: string; avatar?: string };
+    
+    const updates: Record<string, any> = {};
+    
+    if (displayName !== undefined) {
+      updates.displayName = displayName?.trim() || null;
+    }
+    
+    if (avatar !== undefined) {
+      // Validate avatar is base64 image (max 500KB)
+      if (avatar && avatar.length > 500 * 1024) {
+        return reply.status(400).send({ ok: false, msg: 'Avatar too large (max 500KB)' });
+      }
+      updates.avatar = avatar || null;
+    }
+    
+    if (Object.keys(updates).length > 0) {
+      await db.update(schema.users)
+        .set(updates)
+        .where(eq(schema.users.id, user.id));
+    }
+    
+    // Log audit
+    await logAudit(
+      user.id,
+      user.username,
+      'UPDATE_PROFILE',
+      'USER',
+      user.id.toString(),
+      { fields: Object.keys(updates) },
+      request.ip,
+      request.headers['user-agent']
+    );
+    
+    return { ok: true };
+  });
+
+  // ============ GET ACTIVE SESSIONS ============
+  app.get('/api/sessions', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+    const user = request.user!;
+    const currentToken = request.session!.token;
+    
+    const sessions = await db.query.sessions.findMany({
+      where: eq(schema.sessions.userId, user.id),
+    });
+    
+    return {
+      ok: true,
+      sessions: sessions.map(s => ({
+        id: s.id,
+        deviceInfo: s.deviceInfo,
+        ipAddress: s.ipAddress,
+        userAgent: s.userAgent,
+        createdAt: s.createdAt,
+        lastActive: s.lastActive,
+        isCurrent: s.token === currentToken,
+      })),
+    };
+  });
+
+  // ============ REVOKE SESSION ============
+  app.delete('/api/sessions/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+    const user = request.user!;
+    const { id } = request.params as { id: string };
+    
+    const session = await db.query.sessions.findFirst({
+      where: eq(schema.sessions.id, parseInt(id)),
+    });
+    
+    if (!session || session.userId !== user.id) {
+      return reply.status(404).send({ ok: false, msg: 'Session not found' });
+    }
+    
+    await db.delete(schema.sessions)
+      .where(eq(schema.sessions.id, parseInt(id)));
+    
+    // Log audit
+    await logAudit(
+      user.id,
+      user.username,
+      'REVOKE_SESSION',
+      'SESSION',
+      id,
+      undefined,
+      request.ip,
+      request.headers['user-agent']
+    );
+    
+    return { ok: true };
+  });
+
+  // ============ REVOKE ALL OTHER SESSIONS ============
+  app.post('/api/sessions/revoke-all', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+    const user = request.user!;
+    const currentToken = request.session!.token;
+    
+    await db.delete(schema.sessions)
+      .where(eq(schema.sessions.userId, user.id));
+    
+    // Re-create current session
+    const expiresAt = getExpiryDate(24);
+    await db.insert(schema.sessions).values({
+      token: currentToken,
+      userId: user.id,
+      expiresAt,
+      ipAddress: request.ip,
+      userAgent: request.headers['user-agent'],
+    });
+    
+    // Log audit
+    await logAudit(
+      user.id,
+      user.username,
+      'REVOKE_ALL_SESSIONS',
+      'SESSION',
+      undefined,
+      undefined,
+      request.ip,
+      request.headers['user-agent']
+    );
+    
+    return { ok: true };
+  });
+
+  // ============ DELETE ACCOUNT ============
+  app.delete('/api/account', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+    const user = request.user!;
+    const { confirmation } = request.body as { confirmation: string };
+    
+    if (confirmation !== user.username) {
+      return reply.status(400).send({ ok: false, msg: 'Please type your username to confirm' });
+    }
+    
+    // Log audit before deletion
+    await logAudit(
+      user.id,
+      user.username,
+      'DELETE_ACCOUNT',
+      'USER',
+      user.id.toString(),
+      undefined,
+      request.ip,
+      request.headers['user-agent']
+    );
+    
+    // Delete user (cascade will handle sessions, files, etc.)
+    await db.delete(schema.users)
+      .where(eq(schema.users.id, user.id));
+    
+    return { ok: true };
   });
 }

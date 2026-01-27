@@ -7,6 +7,8 @@ export const users = sqliteTable('users', {
   username: text('username').unique().notNull(),
   publicKeyPem: text('public_key_pem').notNull(), // ECDSA signing key
   encryptionPublicKeyPem: text('encryption_public_key_pem'), // RSA-OAEP encryption key
+  avatar: text('avatar'), // Base64 encoded avatar image
+  displayName: text('display_name'), // Optional display name
   storageUsed: integer('storage_used').default(0),
   storageQuota: integer('storage_quota').default(524288000), // 500MB
   isAdmin: integer('is_admin', { mode: 'boolean' }).default(false),
