@@ -51,7 +51,7 @@ await app.register(helmet, {
       mediaSrc: ["'self'", 'blob:'], // Allow video/audio preview
       objectSrc: ["'self'", 'blob:'], // Allow PDF and other object embeds
       frameSrc: ["'self'", 'blob:'], // Allow iframe preview
-      connectSrc: ["'self'"],
+      connectSrc: ["'self'", 'blob:'], // Allow fetch from blob URLs for text preview
       workerSrc: ["'self'", 'blob:'],
       upgradeInsecureRequests: null, // Disable HTTPS upgrade for HTTP-only deployments
     },
