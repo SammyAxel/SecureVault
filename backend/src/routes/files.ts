@@ -373,7 +373,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
           if (currentParentId === fileId) {
             return reply.status(400).send({ ok: false, msg: 'Cannot move folder into its descendant' });
           }
-          const parent = await db.query.files.findFirst({
+          const parent: { parentId: string | null } | undefined = await db.query.files.findFirst({
             where: eq(schema.files.id, currentParentId),
           });
           currentParentId = parent?.parentId || null;
