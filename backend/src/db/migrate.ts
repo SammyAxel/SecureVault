@@ -20,6 +20,8 @@ db.exec(`
     username TEXT UNIQUE NOT NULL,
     public_key_pem TEXT NOT NULL,
     encryption_public_key_pem TEXT,
+    avatar TEXT,
+    display_name TEXT,
     storage_used INTEGER DEFAULT 0,
     storage_quota INTEGER DEFAULT 524288000,
     is_admin INTEGER DEFAULT 0,
@@ -80,6 +82,20 @@ db.exec(`
     max_access INTEGER
   );
 
+  -- Audit logs table
+  CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    username TEXT NOT NULL,
+    action TEXT NOT NULL,
+    resource_type TEXT,
+    resource_id TEXT,
+    details TEXT,
+    ip_address TEXT,
+    user_agent TEXT,
+    created_at INTEGER DEFAULT (unixepoch())
+  );
+
   -- Create indexes
   CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
   CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
@@ -88,6 +104,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_file_shares_file ON file_shares(file_id);
   CREATE INDEX IF NOT EXISTS idx_file_shares_recipient ON file_shares(recipient_id);
   CREATE INDEX IF NOT EXISTS idx_public_shares_token ON public_shares(token);
+  CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
+  CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
 `);
 
 console.log('✅ Database tables created successfully!');
