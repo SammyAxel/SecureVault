@@ -14,14 +14,20 @@ import { adminRoutes } from './routes/admin.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+const isDev = process.env.NODE_ENV !== 'production';
+
 const app = Fastify({
-  logger: {
-    level: process.env.LOG_LEVEL || 'info',
-    transport: {
-      target: 'pino-pretty',
-      options: { colorize: true },
-    },
-  },
+  logger: isDev
+    ? {
+        level: process.env.LOG_LEVEL || 'info',
+        transport: {
+          target: 'pino-pretty',
+          options: { colorize: true },
+        },
+      }
+    : {
+        level: process.env.LOG_LEVEL || 'info',
+      },
 });
 
 // ============ PLUGINS ============
