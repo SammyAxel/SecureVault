@@ -1,4 +1,5 @@
 import { createSignal, createEffect, Show, For } from 'solid-js';
+import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile } from './FilePreview';
 
 interface SharedFile {
   id: string;
@@ -97,30 +98,11 @@ export default function PublicShare() {
   const token = getToken();
   
   const getMimeType = (filename: string): string => {
-    const ext = filename.split('.').pop()?.toLowerCase() || '';
-    const mimeTypes: Record<string, string> = {
-      'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
-      'gif': 'image/gif', 'webp': 'image/webp', 'svg': 'image/svg+xml', 'bmp': 'image/bmp',
-      'mp4': 'video/mp4', 'webm': 'video/webm', 'mov': 'video/quicktime', 'ogg': 'video/ogg',
-      'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'flac': 'audio/flac', 'm4a': 'audio/mp4',
-      'pdf': 'application/pdf', 'txt': 'text/plain', 'json': 'application/json',
-      'js': 'text/javascript', 'ts': 'text/typescript', 'html': 'text/html',
-      'css': 'text/css', 'md': 'text/markdown', 'py': 'text/x-python',
-      'zip': 'application/zip', 'doc': 'application/msword',
-      'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    };
-    return mimeTypes[ext] || 'application/octet-stream';
+    return getPreviewMimeType(filename);
   };
   
   const isPreviewable = (filename: string): boolean => {
-    const ext = filename.split('.').pop()?.toLowerCase() || '';
-    const previewable = [
-      'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp',
-      'mp4', 'webm', 'ogg', 'mov',
-      'mp3', 'wav', 'flac', 'm4a',
-      'pdf', 'txt', 'md', 'json', 'js', 'ts', 'html', 'css', 'py'
-    ];
-    return previewable.includes(ext);
+    return isPreviewableFile(filename);
   };
   
   createEffect(async () => {
@@ -184,12 +166,12 @@ export default function PublicShare() {
       const mimeType = getMimeType(filename);
       setPreviewMimeType(mimeType);
       
-      // For text files, read as text
-      if (mimeType.startsWith('text/') || mimeType === 'application/json') {
+      // For text files (except CSV), read as text
+      if ((mimeType.startsWith('text/') && mimeType !== 'text/csv') || mimeType === 'application/json') {
         const text = new TextDecoder().decode(decryptedData);
         setTextContent(text);
       } else {
-        // For binary files, create blob URL
+        // For binary files (images, video, audio, PDF, CSV, Excel, Word), create blob URL
         const blob = new Blob([decryptedData], { type: mimeType });
         const url = URL.createObjectURL(blob);
         setPreviewUrl(url);
@@ -461,7 +443,23 @@ export default function PublicShare() {
       );
     }
     
-    if (mime.startsWith('text/') || mime === 'application/json') {
+    // CSV Preview
+    if (mime === 'text/csv') {
+      return <CsvPreview url={url!} />;
+    }
+    
+    // Excel Preview
+    if (mime.includes('spreadsheet') || mime.includes('excel')) {
+      return <ExcelPreview url={url!} />;
+    }
+    
+    // Word Preview
+    if (mime.includes('wordprocessingml') || mime === 'application/msword') {
+      return <WordPreview url={url!} />;
+    }
+    
+    // Text/Code Preview (but not CSV)
+    if ((mime.startsWith('text/') && mime !== 'text/csv') || mime === 'application/json') {
       return (
         <pre class="bg-gray-900 p-4 rounded-lg overflow-auto max-h-[60vh] text-sm text-gray-300 font-mono whitespace-pre-wrap text-left">
           {text}

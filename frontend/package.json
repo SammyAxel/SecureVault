@@ -8,7 +8,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "solid-js": "^1.8.11"
+    "solid-js": "^1.8.11",
+    "xlsx": "^0.18.5",
+    "mammoth": "^1.6.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

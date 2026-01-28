@@ -5,6 +5,7 @@ import type { FileItem } from '../lib/api';
 import ShareModal from './ShareModal';
 import { toast } from '../stores/toast';
 import { openConfirm } from '../stores/confirm';
+import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile, getFileExtension } from './FilePreview';
 import {
   getCurrentKeys,
   importEncryptionPrivateKey,
@@ -19,31 +20,11 @@ import {
 
 // Helper to get MIME type from filename
 function getMimeType(filename: string): string {
-  const ext = filename.split('.').pop()?.toLowerCase() || '';
-  const mimeTypes: Record<string, string> = {
-    // Images
-    'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 
-    'gif': 'image/gif', 'webp': 'image/webp', 'svg': 'image/svg+xml', 'bmp': 'image/bmp',
-    // Videos
-    'mp4': 'video/mp4', 'webm': 'video/webm', 'ogg': 'video/ogg', 'mov': 'video/quicktime',
-    // Audio
-    'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'flac': 'audio/flac', 'm4a': 'audio/mp4',
-    // Documents
-    'pdf': 'application/pdf',
-    // Text/Code
-    'txt': 'text/plain', 'md': 'text/markdown', 'json': 'application/json',
-    'js': 'text/javascript', 'ts': 'text/typescript', 'html': 'text/html', 
-    'css': 'text/css', 'py': 'text/x-python', 'java': 'text/x-java',
-  };
-  return mimeTypes[ext] || 'application/octet-stream';
+  return getPreviewMimeType(filename);
 }
 
 function isPreviewable(filename: string): boolean {
-  const ext = filename.split('.').pop()?.toLowerCase() || '';
-  const previewable = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 
-    'mp4', 'webm', 'ogg', 'mov', 'mp3', 'wav', 'flac', 'm4a', 
-    'pdf', 'txt', 'md', 'json', 'js', 'ts', 'html', 'css', 'py', 'java'];
-  return previewable.includes(ext);
+  return isPreviewableFile(filename);
 }
 
 export default function Dashboard() {
@@ -1029,8 +1010,26 @@ export default function Dashboard() {
                 />
               </Show>
               
+              {/* CSV Preview */}
+              <Show when={previewFile()?.mimeType === 'text/csv'}>
+                <CsvPreview url={previewFile()!.url} />
+              </Show>
+              
+              {/* Excel Preview */}
+              <Show when={previewFile()?.mimeType.includes('spreadsheet') || previewFile()?.mimeType.includes('excel')}>
+                <ExcelPreview url={previewFile()!.url} />
+              </Show>
+              
+              {/* Word Preview */}
+              <Show when={previewFile()?.mimeType.includes('wordprocessingml') || previewFile()?.mimeType === 'application/msword'}>
+                <WordPreview url={previewFile()!.url} />
+              </Show>
+              
               {/* Text/Code Preview */}
-              <Show when={previewFile()?.mimeType.startsWith('text/') || previewFile()?.mimeType === 'application/json'}>
+              <Show when={
+                (previewFile()?.mimeType.startsWith('text/') && previewFile()?.mimeType !== 'text/csv') || 
+                previewFile()?.mimeType === 'application/json'
+              }>
                 <TextPreview url={previewFile()!.url} />
               </Show>
             </div>
