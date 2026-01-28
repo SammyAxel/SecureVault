@@ -30,6 +30,70 @@ const loginVerifySchema = z.object({
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   
+  // ============ CHECK SETUP STATUS ============
+  app.get('/api/setup/status', async (request, reply) => {
+    // Check if any admin user exists
+    const admins = await db.query.users.findMany({
+      where: eq(schema.users.isAdmin, true),
+    });
+    
+    return {
+      ok: true,
+      needsSetup: admins.length === 0,
+    };
+  });
+
+  // ============ INITIAL SETUP (Create First Admin) ============
+  app.post('/api/setup/admin', async (request, reply) => {
+    // Check if setup is still needed
+    const hasAdmin = await db.query.users.findFirst({
+      where: eq(schema.users.isAdmin, true),
+    });
+    
+    if (hasAdmin) {
+      return reply.status(400).send({ ok: false, msg: 'Admin already exists. Setup is complete.' });
+    }
+    
+    const body = registerSchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid request', errors: body.error.errors });
+    }
+    
+    const { username, publicKey, encryptionPublicKey } = body.data;
+    
+    // Check if username exists
+    const existing = await db.query.users.findFirst({
+      where: eq(schema.users.username, username),
+    });
+    
+    if (existing) {
+      return reply.status(409).send({ ok: false, msg: 'Username already exists' });
+    }
+    
+    // Create admin user
+    const [user] = await db.insert(schema.users).values({
+      username,
+      publicKeyPem: publicKey,
+      encryptionPublicKeyPem: encryptionPublicKey,
+      isAdmin: true, // First user is admin!
+      storageQuota: 5 * 1024 * 1024 * 1024, // 5GB for admin
+    }).returning();
+    
+    // Log audit
+    await logAudit(
+      user.id,
+      user.username,
+      'SETUP_ADMIN',
+      'USER',
+      user.id.toString(),
+      { firstSetup: true },
+      request.ip,
+      request.headers['user-agent']
+    );
+    
+    return { ok: true, userId: user.id, username: user.username, isAdmin: true };
+  });
+
   // ============ REGISTER ============
   app.post('/api/register', async (request, reply) => {
     const body = registerSchema.safeParse(request.body);

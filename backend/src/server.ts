@@ -77,6 +77,16 @@ await app.register(adminRoutes);
 // Health check
 app.get('/api/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
 
+// ============ DATABASE MIGRATION ============
+// Run migrations on startup
+try {
+  await import('./db/migrate.js');
+  console.log('✅ Database migrations completed');
+} catch (err) {
+  console.error('❌ Database migration failed:', err);
+  process.exit(1);
+}
+
 // ============ START SERVER ============
 const PORT = parseInt(process.env.PORT || '3000');
 const HOST = process.env.HOST || '0.0.0.0';

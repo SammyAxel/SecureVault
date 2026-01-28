@@ -39,6 +39,23 @@ async function request<T>(
   return data;
 }
 
+// ============ SETUP ============
+
+export async function checkSetupStatus() {
+  return request<{ ok: boolean; needsSetup: boolean; userCount: number }>('/setup/status');
+}
+
+export async function setupAdmin(
+  username: string,
+  publicKey: string,
+  encryptionPublicKey: string
+) {
+  return request<{ ok: boolean; userId: number; username: string; isAdmin: boolean }>('/setup/admin', {
+    method: 'POST',
+    body: JSON.stringify({ username, publicKey, encryptionPublicKey }),
+  });
+}
+
 // ============ AUTH ============
 
 export async function register(

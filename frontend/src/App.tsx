@@ -1,12 +1,14 @@
-import { createSignal, Show, createEffect } from 'solid-js';
+import { createSignal, Show, createEffect, onMount } from 'solid-js';
 import { AuthProvider, useAuth } from './stores/auth.jsx';
 import Login from './components/Login';
 import Register from './components/Register';
 import Dashboard from './components/Dashboard';
 import Profile from './components/Profile';
 import AdminDashboard from './components/AdminDashboard';
+import Setup from './components/Setup';
 import ToastContainer from './components/Toast';
 import ConfirmModal from './components/ConfirmModal';
+import * as api from './lib/api';
 
 // Simple path-based routing
 function useRoute() {
@@ -29,6 +31,8 @@ function useRoute() {
 function AppContent() {
   const { user, isLoading, logout } = useAuth();
   const [showRegister, setShowRegister] = createSignal(false);
+  const [needsSetup, setNeedsSetup] = createSignal(false);
+  const [checkingSetup, setCheckingSetup] = createSignal(true);
   const { path, navigate } = useRoute();
   
   // Check if we're on admin page
@@ -37,8 +41,39 @@ function AppContent() {
   // Check if we're on profile page
   const isProfilePage = () => path() === '/profile';
 
+  // Check setup status on mount
+  onMount(async () => {
+    try {
+      const status = await api.checkSetupStatus();
+      setNeedsSetup(status.needsSetup);
+    } catch (err) {
+      console.error('Failed to check setup status:', err);
+      setNeedsSetup(false); // Assume setup is done if check fails
+    } finally {
+      setCheckingSetup(false);
+    }
+  });
+
   return (
-    <div class="min-h-screen bg-gray-900">
+    <>
+      {/* Loading state */}
+      <Show when={checkingSetup()}>
+        <div class="min-h-screen bg-gray-900 flex items-center justify-center">
+          <div class="text-center">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto mb-4"></div>
+            <p class="text-gray-400">Loading SecureVault...</p>
+          </div>
+        </div>
+      </Show>
+
+      {/* Setup wizard */}
+      <Show when={!checkingSetup() && needsSetup()}>
+        <Setup onComplete={() => setNeedsSetup(false)} />
+      </Show>
+
+      {/* Main app */}
+      <Show when={!checkingSetup() && !needsSetup()}>
+        <div class="min-h-screen bg-gray-900">
       {/* Header */}
       <header class="bg-gray-800 border-b border-gray-700">
         <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
@@ -141,7 +176,9 @@ function AppContent() {
           </Show>
         </Show>
       </main>
-    </div>
+        </div>
+      </Show>
+    </>
   );
 }
 
