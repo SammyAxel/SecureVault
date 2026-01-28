@@ -69,7 +69,7 @@ await app.register(multipart, {
 // Serve static frontend files in production
 if (process.env.NODE_ENV === 'production') {
   await app.register(fastifyStatic, {
-    root: join(__dirname, '../../frontend/dist'),
+    root: join(__dirname, '../frontend/dist'),
     prefix: '/',
   });
 }
