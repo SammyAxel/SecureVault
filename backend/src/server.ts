@@ -48,6 +48,9 @@ await app.register(helmet, {
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'blob:'],
+      mediaSrc: ["'self'", 'blob:'], // Allow video/audio preview
+      objectSrc: ["'self'", 'blob:'], // Allow PDF and other object embeds
+      frameSrc: ["'self'", 'blob:'], // Allow iframe preview
       connectSrc: ["'self'"],
       workerSrc: ["'self'", 'blob:'],
       upgradeInsecureRequests: null, // Disable HTTPS upgrade for HTTP-only deployments
