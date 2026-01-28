@@ -6,6 +6,7 @@ import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { readFile } from 'fs/promises';
 
 import { authRoutes } from './routes/auth.js';
 import { fileRoutes } from './routes/files.js';
@@ -82,6 +83,20 @@ await app.register(adminRoutes);
 
 // Health check
 app.get('/api/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+
+// SPA fallback - serve index.html for all non-API routes
+if (process.env.NODE_ENV === 'production') {
+  app.setNotFoundHandler(async (request, reply) => {
+    // Don't serve index.html for API routes
+    if (request.url.startsWith('/api/')) {
+      return reply.status(404).send({ error: 'Not Found' });
+    }
+    
+    const indexPath = join(__dirname, '../frontend/dist/index.html');
+    const html = await readFile(indexPath, 'utf-8');
+    return reply.type('text/html').send(html);
+  });
+}
 
 // ============ DATABASE MIGRATION ============
 // Run migrations on startup
