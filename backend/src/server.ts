@@ -50,8 +50,10 @@ await app.register(helmet, {
       imgSrc: ["'self'", 'data:', 'blob:'],
       connectSrc: ["'self'"],
       workerSrc: ["'self'", 'blob:'],
+      upgradeInsecureRequests: null, // Disable HTTPS upgrade for HTTP-only deployments
     },
   },
+  hsts: false, // Disable HSTS for HTTP deployments
 });
 
 // Rate limiting
