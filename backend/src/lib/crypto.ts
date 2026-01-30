@@ -15,16 +15,10 @@ export function generateUUID(): string {
 }
 
 /**
- * Generate a short URL-friendly UID (8 chars alphanumeric)
+ * Generate a UUID v4 for file/folder UIDs
  */
 export function generateUID(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  const bytes = randomBytes(8);
-  let result = '';
-  for (let i = 0; i < 8; i++) {
-    result += chars[bytes[i] % chars.length];
-  }
-  return result;
+  return crypto.randomUUID();
 }
 
 /**
