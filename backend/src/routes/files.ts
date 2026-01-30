@@ -140,6 +140,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     const fields = data.fields as any;
     const encryptedKey = fields.encrypted_key?.value;
     const iv = fields.iv?.value;
+    const fileHash = fields.file_hash?.value;
     const parentId = fields.parent_id?.value || null;
     
     if (!encryptedKey || !iv) {
@@ -147,8 +148,31 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Malware scan (VirusTotal) if configured
-    const scanResult = await virusTotalScan(buffer, data.filename);
+    // Use file hash from frontend (calculated from original file) if provided, otherwise fallback to encrypted file
+    const scanResult = await virusTotalScan(buffer, data.filename, fileHash);
     if (!scanResult.safe) {
+      // Log blocked upload due to malware
+      await logAudit(
+        user.id,
+        user.username,
+        'UPLOAD_BLOCKED',
+        'FILE',
+        undefined,
+        { 
+          filename: data.filename, 
+          fileSize,
+          virusTotalScan: {
+            result: 'MALICIOUS',
+            maliciousCount: scanResult.malicious ?? 0,
+            suspiciousCount: scanResult.suspicious ?? 0,
+            hashFound: scanResult.hashFound ?? false,
+            error: scanResult.error ?? null,
+          }
+        },
+        request.ip,
+        request.headers['user-agent']
+      );
+      
       return reply.status(400).send({
         ok: false,
         msg: scanResult.error ?? `File flagged as malicious (${scanResult.malicious ?? 0} engines). Upload blocked.`,
@@ -179,14 +203,25 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       .set({ storageUsed: user.storageUsed! + fileSize })
       .where(eq(schema.users.id, user.id));
     
-    // Log audit
+    // Log audit with VirusTotal scan details
     await logAudit(
       user.id,
       user.username,
       'UPLOAD',
       'FILE',
       fileId,
-      { filename: data.filename, fileSize, uid: fileUid },
+      { 
+        filename: data.filename, 
+        fileSize, 
+        uid: fileUid,
+        virusTotalScan: {
+          result: scanResult.hashFound === false ? 'UNKNOWN' : 'CLEAN',
+          maliciousCount: scanResult.malicious ?? 0,
+          suspiciousCount: scanResult.suspicious ?? 0,
+          hashFound: scanResult.hashFound ?? false,
+          error: scanResult.error ?? null,
+        }
+      },
       request.ip,
       request.headers['user-agent']
     );

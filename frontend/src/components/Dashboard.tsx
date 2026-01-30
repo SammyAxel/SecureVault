@@ -194,10 +194,18 @@ export default function Dashboard(props: DashboardProps) {
 
     for (const file of Array.from(fileList)) {
       try {
-        setUploadProgress(`Encrypting ${file.name}...`);
+        setUploadProgress(`Reading ${file.name}...`);
 
         // Read file
         const arrayBuffer = await file.arrayBuffer();
+
+        setUploadProgress(`Calculating hash ${file.name}...`);
+        
+        // Calculate hash of original file (before encryption) for VirusTotal scanning
+        const { calculateFileHash } = await import('../lib/crypto');
+        const fileHash = await calculateFileHash(arrayBuffer);
+
+        setUploadProgress(`Encrypting ${file.name}...`);
 
         // Encrypt file
         const { encrypted, key, iv } = await encryptFile(arrayBuffer);
@@ -214,6 +222,7 @@ export default function Dashboard(props: DashboardProps) {
           encrypted,
           wrappedKey,
           arrayBufferToBase64(iv),
+          fileHash,
           currentFolder() || undefined
         );
 

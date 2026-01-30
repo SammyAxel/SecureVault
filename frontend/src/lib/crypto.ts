@@ -464,3 +464,14 @@ export function clearCurrentKeys(): void {
     console.warn('Failed to clear keys from localStorage:', e);
   }
 }
+
+/**
+ * Calculate SHA256 hash of a file (for VirusTotal scanning)
+ * Returns hex string
+ */
+export async function calculateFileHash(buffer: ArrayBuffer): Promise<string> {
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  return hashHex;
+}

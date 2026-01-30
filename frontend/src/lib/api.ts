@@ -242,12 +242,14 @@ export async function uploadFile(
   encryptedData: ArrayBuffer,
   encryptedKey: string,
   iv: string,
+  fileHash: string,
   parentId?: string
 ) {
   const formData = new FormData();
   formData.append('file', new Blob([encryptedData]), file.name);
   formData.append('encrypted_key', encryptedKey);
   formData.append('iv', iv);
+  formData.append('file_hash', fileHash);
   if (parentId) {
     formData.append('parent_id', parentId);
   }
@@ -430,6 +432,20 @@ export interface AdminUser {
   createdAt: string;
 }
 
+export interface VirusTotalKey {
+  id: string;
+  maskedKey: string;
+  enabled: boolean;
+  label?: string;
+  usageToday: number;
+}
+
+export interface VirusTotalUsage {
+  date: string;
+  total: number;
+  limit: number;
+}
+
 export interface AuditLogEntry {
   id: number;
   userId: number | null;
@@ -493,6 +509,30 @@ export async function updateAdminSettings(settings: { virusTotalApiKey?: string 
   return request<{ ok: boolean; virusTotalConfigured: boolean }>('/admin/settings', {
     method: 'PATCH',
     body: JSON.stringify(settings),
+  });
+}
+
+export async function getVirusTotalKeys() {
+  return request<{ ok: boolean; keys: VirusTotalKey[]; usage: VirusTotalUsage }>('/admin/virustotal-keys');
+}
+
+export async function addVirusTotalKey(key: string, label?: string) {
+  return request<{ ok: boolean; keys: VirusTotalKey[]; usage: VirusTotalUsage }>('/admin/virustotal-keys', {
+    method: 'POST',
+    body: JSON.stringify({ key, label }),
+  });
+}
+
+export async function updateVirusTotalKey(id: string, updates: { enabled?: boolean; label?: string }) {
+  return request<{ ok: boolean; keys: VirusTotalKey[]; usage: VirusTotalUsage }>(`/admin/virustotal-keys/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  });
+}
+
+export async function removeVirusTotalKey(id: string) {
+  return request<{ ok: boolean; keys: VirusTotalKey[]; usage: VirusTotalUsage }>(`/admin/virustotal-keys/${id}`, {
+    method: 'DELETE',
   });
 }
 

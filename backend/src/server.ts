@@ -118,7 +118,8 @@ try {
 
 // ============ START SERVER ============
 const PORT = parseInt(process.env.PORT || '3000');
-const HOST = process.env.HOST || '0.0.0.0';
+// In development, listen on localhost; in production, listen on all interfaces
+const HOST = process.env.HOST || (isDev ? 'localhost' : '0.0.0.0');
 
 try {
   await app.listen({ port: PORT, host: HOST });

@@ -2,7 +2,15 @@ import { FastifyInstance } from 'fastify';
 import { db, schema } from '../db/index.js';
 import { eq, desc, sql, count, sum, and, gte } from 'drizzle-orm';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
-import { getVirusTotalApiKey, setVirusTotalApiKey } from '../lib/virustotal.js';
+import {
+  getVirusTotalApiKey,
+  setVirusTotalApiKey,
+  listVirusTotalKeys,
+  addVirusTotalKey,
+  updateVirusTotalKey,
+  removeVirusTotalKey,
+  getVirusTotalUsageSummary,
+} from '../lib/virustotal.js';
 import { z } from 'zod';
 
 // Admin middleware - checks if user is admin
@@ -53,6 +61,16 @@ const adminSettingsSchema = z.object({
   virusTotalApiKey: z.string().max(500).optional(),
 });
 
+const addVirusTotalKeySchema = z.object({
+  key: z.string().min(10).max(500),
+  label: z.string().max(100).optional(),
+});
+
+const updateVirusTotalKeySchema = z.object({
+  enabled: z.boolean().optional(),
+  label: z.string().max(100).optional(),
+});
+
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   
   // ============ ADMIN SETTINGS (VirusTotal etc.) ============
@@ -77,6 +95,50 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       ok: true,
       virusTotalConfigured: !!(apiKey && apiKey.length > 0),
     };
+  });
+
+  // ============ VIRUSTOTAL API KEY MANAGEMENT ============
+  app.get('/api/admin/virustotal-keys', { preHandler: requireAdmin }, async (_request: AuthenticatedRequest, _reply) => {
+    const keys = await listVirusTotalKeys();
+    const usage = await getVirusTotalUsageSummary();
+    return { ok: true, keys, usage };
+  });
+
+  app.post('/api/admin/virustotal-keys', { preHandler: requireAdmin }, async (request: AuthenticatedRequest, reply) => {
+    const body = addVirusTotalKeySchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid request' });
+    }
+    await addVirusTotalKey(body.data.key, body.data.label);
+    const keys = await listVirusTotalKeys();
+    const usage = await getVirusTotalUsageSummary();
+    return { ok: true, keys, usage };
+  });
+
+  app.patch('/api/admin/virustotal-keys/:id', { preHandler: requireAdmin }, async (request: AuthenticatedRequest, reply) => {
+    const { id } = request.params as { id: string };
+    const body = updateVirusTotalKeySchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid request' });
+    }
+    const updated = await updateVirusTotalKey(id, body.data);
+    if (!updated) {
+      return reply.status(404).send({ ok: false, msg: 'API key not found' });
+    }
+    const keys = await listVirusTotalKeys();
+    const usage = await getVirusTotalUsageSummary();
+    return { ok: true, keys, usage };
+  });
+
+  app.delete('/api/admin/virustotal-keys/:id', { preHandler: requireAdmin }, async (request: AuthenticatedRequest, reply) => {
+    const { id } = request.params as { id: string };
+    const removed = await removeVirusTotalKey(id);
+    if (!removed) {
+      return reply.status(404).send({ ok: false, msg: 'API key not found' });
+    }
+    const keys = await listVirusTotalKeys();
+    const usage = await getVirusTotalUsageSummary();
+    return { ok: true, keys, usage };
   });
 
   // ============ ADMIN DASHBOARD STATS ============
