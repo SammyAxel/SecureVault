@@ -30,7 +30,9 @@ async function request<T>(
     headers,
   });
   
-  const data = await response.json();
+  // Handle empty responses
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : {};
   
   if (!response.ok) {
     throw new ApiError(response.status, data.msg || 'Request failed');
@@ -492,6 +494,52 @@ export async function getUserSessions(userId: number) {
 
 export async function adminRevokeSession(sessionId: number) {
   return request<{ ok: boolean }>(`/admin/sessions/${sessionId}`, {
+    method: 'DELETE',
+  });
+}
+
+// ============ NOTIFICATIONS ============
+
+export interface NotificationItem {
+  id: number;
+  userId: number;
+  type: string;
+  title: string;
+  message: string;
+  read: boolean;
+  actionUrl: string | null;
+  metadata: string | null;
+  createdAt: Date;
+}
+
+export async function getNotifications(unreadOnly = false) {
+  return request<{
+    ok: boolean;
+    notifications: NotificationItem[];
+    unreadCount: number;
+  }>(`/notifications${unreadOnly ? '?unread_only=true' : ''}`);
+}
+
+export async function markNotificationRead(id: number) {
+  return request<{ ok: boolean }>(`/notifications/${id}/read`, {
+    method: 'PATCH',
+  });
+}
+
+export async function markAllNotificationsRead() {
+  return request<{ ok: boolean }>(`/notifications/read-all`, {
+    method: 'PATCH',
+  });
+}
+
+export async function deleteNotification(id: number) {
+  return request<{ ok: boolean }>(`/notifications/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function clearAllNotifications() {
+  return request<{ ok: boolean }>(`/notifications`, {
     method: 'DELETE',
   });
 }

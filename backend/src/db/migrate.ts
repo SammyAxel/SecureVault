@@ -97,6 +97,19 @@ db.exec(`
     created_at INTEGER DEFAULT (unixepoch())
   );
 
+  -- Notifications table
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    read INTEGER DEFAULT 0,
+    action_url TEXT,
+    metadata TEXT,
+    created_at INTEGER DEFAULT (unixepoch())
+  );
+
   -- Create indexes
   CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
   CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
@@ -108,7 +121,26 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_public_shares_token ON public_shares(token);
   CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
   CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+  CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+  CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
+  CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
 `);
+
+// ============ MIGRATIONS ============
+// Manual migration for 'uid' column in files table
+const fileColumns = db.pragma('table_info(files)') as any[];
+const hasUid = fileColumns.some((col) => col.name === 'uid');
+
+if (!hasUid) {
+  console.log('⚡ Running migration: Adding uid column to files table...');
+  try {
+    db.exec('ALTER TABLE files ADD COLUMN uid TEXT');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_files_uid ON files(uid)');
+    console.log('✅ Migration successful: uid column added');
+  } catch (error) {
+    console.error('❌ Migration failed:', error);
+  }
+}
 
 console.log('✅ Database tables created successfully!');
 db.close();

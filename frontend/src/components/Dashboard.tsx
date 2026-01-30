@@ -3,9 +3,11 @@ import { useAuth } from '../stores/auth.jsx';
 import * as api from '../lib/api';
 import type { FileItem } from '../lib/api';
 import ShareModal from './ShareModal';
+import NotificationCenter from './NotificationCenter';
 import { toast } from '../stores/toast';
 import { openConfirm } from '../stores/confirm';
 import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile, getFileExtension } from './FilePreview';
+import { SkeletonDashboard } from './Skeleton';
 import {
   getCurrentKeys,
   importEncryptionPrivateKey,
@@ -671,6 +673,8 @@ export default function Dashboard(props: DashboardProps) {
         </div>
 
         <div class="flex items-center gap-3">
+          <NotificationCenter />
+          
           <button
             onClick={openCreateFolderModal}
             class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm flex items-center gap-2"
@@ -844,9 +848,7 @@ export default function Dashboard(props: DashboardProps) {
         onDrop={handleDrop}
       >
         <Show when={isLoading()}>
-          <div class="flex items-center justify-center py-12">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
-          </div>
+          <SkeletonDashboard />
         </Show>
 
         {/* Empty state - no files at all */}

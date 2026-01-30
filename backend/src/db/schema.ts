@@ -84,12 +84,26 @@ export const auditLogs = sqliteTable('audit_logs', {
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 
+// ============ NOTIFICATIONS ============
+export const notifications = sqliteTable('notifications', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  type: text('type').notNull(), // 'file_shared', 'admin_action', 'storage_warning', 'public_access', etc.
+  title: text('title').notNull(),
+  message: text('message').notNull(),
+  read: integer('read', { mode: 'boolean' }).default(false),
+  actionUrl: text('action_url'), // Optional URL to navigate to
+  metadata: text('metadata'), // JSON string with additional data
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
 // ============ RELATIONS ============
 export const usersRelations = relations(users, ({ many }) => ({
   sessions: many(sessions),
   files: many(files),
   sharedFiles: many(fileShares),
   auditLogs: many(auditLogs),
+  notifications: many(notifications),
 }));
 
 export const sessionsRelations = relations(sessions, ({ one }) => ({
@@ -117,6 +131,10 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   user: one(users, { fields: [auditLogs.userId], references: [users.id] }),
 }));
 
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+  user: one(users, { fields: [notifications.userId], references: [users.id] }),
+}));
+
 // ============ TYPE EXPORTS ============
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -126,6 +144,8 @@ export type File = typeof files.$inferSelect;
 export type NewFile = typeof files.$inferInsert;
 export type FileShare = typeof fileShares.$inferSelect;
 export type NewFileShare = typeof fileShares.$inferInsert;
+export type Notification = typeof notifications.$inferSelect;
+export type NewNotification = typeof notifications.$inferInsert;
 export type PublicShare = typeof publicShares.$inferSelect;
 export type NewPublicShare = typeof publicShares.$inferInsert;
 export type AuditLog = typeof auditLogs.$inferSelect;

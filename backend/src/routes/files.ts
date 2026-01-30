@@ -277,20 +277,56 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(404).send({ ok: false, msg: 'File not found' });
     }
     
-    // Always permanent delete - remove physical file
-    if (file.storagePath) {
-      const deleted = await deleteFile(file.storagePath);
-      if (!deleted) {
-        console.warn(`Failed to delete physical file: ${file.storagePath}`);
+    // Calculate total size to reclaim (including all children if it's a folder)
+    let totalSizeToReclaim = 0;
+    
+    if (file.isFolder) {
+      // Get all files recursively in this folder
+      const getAllChildFiles = async (parentId: string): Promise<typeof schema.files.$inferSelect[]> => {
+        const children = await db.query.files.findMany({
+          where: eq(schema.files.parentId, parentId),
+        });
+        
+        let allFiles: typeof schema.files.$inferSelect[] = [...children];
+        for (const child of children) {
+          if (child.isFolder) {
+            const subChildren = await getAllChildFiles(child.id);
+            allFiles = [...allFiles, ...subChildren];
+          }
+        }
+        return allFiles;
+      };
+      
+      const allChildren = await getAllChildFiles(file.id);
+      totalSizeToReclaim = allChildren.reduce((sum, f) => sum + (f.fileSize || 0), 0);
+      
+      // Delete physical files for all children
+      for (const childFile of allChildren) {
+        if (childFile.storagePath) {
+          const deleted = await deleteFile(childFile.storagePath);
+          if (!deleted) {
+            console.warn(`Failed to delete physical file: ${childFile.storagePath}`);
+          }
+        }
+      }
+    } else {
+      totalSizeToReclaim = file.fileSize || 0;
+      
+      // Delete physical file
+      if (file.storagePath) {
+        const deleted = await deleteFile(file.storagePath);
+        if (!deleted) {
+          console.warn(`Failed to delete physical file: ${file.storagePath}`);
+        }
       }
     }
     
-    // Delete from database
+    // Delete from database (CASCADE will handle children)
     await db.delete(schema.files).where(eq(schema.files.id, fileId));
     
     // Update storage quota
     await db.update(schema.users)
-      .set({ storageUsed: Math.max(0, user.storageUsed! - file.fileSize!) })
+      .set({ storageUsed: Math.max(0, user.storageUsed! - totalSizeToReclaim) })
       .where(eq(schema.users.id, user.id));
     
     // Log audit
@@ -300,7 +336,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       'DELETE',
       file.isFolder ? 'FOLDER' : 'FILE',
       fileId,
-      { filename: file.filename, fileSize: file.fileSize },
+      { filename: file.filename, fileSize: totalSizeToReclaim },
       request.ip,
       request.headers['user-agent']
     );
