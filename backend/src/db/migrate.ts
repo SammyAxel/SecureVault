@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdir } from 'fs/promises';
 import { dirname } from 'path';
 
-const DB_PATH = './data/securevault.db';
+const DB_PATH = process.env.DATABASE_URL || './data/securevault.db';
 
 // Ensure data directory exists
 await mkdir(dirname(DB_PATH), { recursive: true });
@@ -123,24 +123,53 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
   CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
   CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
-  CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
 `);
 
-// ============ MIGRATIONS ============
-// Manual migration for 'uid' column in files table
-const fileColumns = db.pragma('table_info(files)') as any[];
-const hasUid = fileColumns.some((col) => col.name === 'uid');
+console.log('✅ Database tables created/verified');
 
-if (!hasUid) {
+// ============ MIGRATIONS ============
+// Helper to check if column exists
+function hasColumn(table: string, column: string): boolean {
+  const columns = db.pragma(`table_info(${table})`) as any[];
+  return columns.some((col) => col.name === column);
+}
+
+// Migration 1: Add 'uid' column to files table
+if (!hasColumn('files', 'uid')) {
   console.log('⚡ Running migration: Adding uid column to files table...');
   try {
     db.exec('ALTER TABLE files ADD COLUMN uid TEXT');
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_files_uid ON files(uid)');
     console.log('✅ Migration successful: uid column added');
   } catch (error) {
-    console.error('❌ Migration failed:', error);
+    console.error('❌ Migration failed (uid):', error);
+    throw error;
   }
 }
 
-console.log('✅ Database tables created successfully!');
+// Migration 2: Add 'avatar' column to users table
+if (!hasColumn('users', 'avatar')) {
+  console.log('⚡ Running migration: Adding avatar column to users table...');
+  try {
+    db.exec('ALTER TABLE users ADD COLUMN avatar TEXT');
+    console.log('✅ Migration successful: avatar column added');
+  } catch (error) {
+    console.error('❌ Migration failed (avatar):', error);
+    throw error;
+  }
+}
+
+// Migration 3: Add 'display_name' column to users table
+if (!hasColumn('users', 'display_name')) {
+  console.log('⚡ Running migration: Adding display_name column to users table...');
+  try {
+    db.exec('ALTER TABLE users ADD COLUMN display_name TEXT');
+    console.log('✅ Migration successful: display_name column added');
+  } catch (error) {
+    console.error('❌ Migration failed (display_name):', error);
+    throw error;
+  }
+}
+
+console.log('✅ All database migrations completed!');
 db.close();
