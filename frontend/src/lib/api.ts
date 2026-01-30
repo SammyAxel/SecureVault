@@ -30,7 +30,9 @@ async function request<T>(
     headers,
   });
   
-  const data = await response.json();
+  // Handle empty responses
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : {};
   
   if (!response.ok) {
     throw new ApiError(response.status, data.msg || 'Request failed');

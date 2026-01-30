@@ -6,6 +6,7 @@ import ShareModal from './ShareModal';
 import { toast } from '../stores/toast';
 import { openConfirm } from '../stores/confirm';
 import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile, getFileExtension } from './FilePreview';
+import { SkeletonDashboard } from './Skeleton';
 import {
   getCurrentKeys,
   importEncryptionPrivateKey,
@@ -844,9 +845,7 @@ export default function Dashboard(props: DashboardProps) {
         onDrop={handleDrop}
       >
         <Show when={isLoading()}>
-          <div class="flex items-center justify-center py-12">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
-          </div>
+          <SkeletonDashboard />
         </Show>
 
         {/* Empty state - no files at all */}

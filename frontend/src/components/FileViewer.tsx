@@ -3,6 +3,7 @@ import { useAuth } from '../stores/auth.jsx';
 import * as api from '../lib/api';
 import type { FileItem } from '../lib/api';
 import { toast } from '../stores/toast';
+import { SkeletonFileViewer } from './Skeleton';
 import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile } from './FilePreview';
 import {
   getCurrentKeys,
@@ -68,10 +69,10 @@ export default function FileViewer(props: FileViewerProps) {
       }
     } catch (err: any) {
       console.error('FileViewer: Failed to load:', err);
-      if (err.message?.includes('403') || err.message?.includes('Access denied')) {
+      if (err.status === 403 || err.message?.includes('403') || err.message?.includes('Access denied')) {
         setErrorType('unauthorized');
         setError('You do not have access to this file');
-      } else if (err.message?.includes('404')) {
+      } else if (err.status === 404 || err.message?.includes('404') || err.message?.includes('not found')) {
         setErrorType('notfound');
         setError('File or folder not found');
       } else {
@@ -343,10 +344,33 @@ export default function FileViewer(props: FileViewerProps) {
     <>
       {/* Loading state */}
       <Show when={isLoading()}>
-        <div class="min-h-screen bg-gray-900 flex items-center justify-center">
-          <div class="text-center">
-            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto mb-4"></div>
-            <p class="text-gray-400">Loading...</p>
+        <SkeletonFileViewer />
+      </Show>
+
+      {/* Not found state - when loading finished but no file and no error */}
+      <Show when={!isLoading() && !file() && !error()}>
+        <div class="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+          <div class="bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-8 text-center">
+            <div class="w-20 h-20 bg-yellow-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+              <svg class="w-10 h-10 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h1 class="text-2xl font-bold text-white mb-2">File Not Found</h1>
+            <p class="text-gray-400 mb-6">This file or folder doesn't exist, has been deleted, or you don't have access to it.</p>
+            
+            <div class="flex gap-3 justify-center">
+              <button
+                onClick={goToDrive}
+                class="px-6 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-medium transition-colors"
+              >
+                Go to My Drive
+              </button>
+            </div>
+            
+            <p class="text-gray-500 text-sm mt-6">
+              🔒 SecureVault • End-to-End Encrypted
+            </p>
           </div>
         </div>
       </Show>

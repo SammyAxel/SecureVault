@@ -45,7 +45,7 @@ function AppContent() {
   
   // Extract UID from /f/:uid path
   const getUIDFromPath = () => {
-    const match = path().match(/^\/f\/([a-zA-Z0-9]+)/);
+    const match = path().match(/^\/f\/([a-zA-Z0-9-]+)/);
     return match ? match[1] : null;
   };
 
