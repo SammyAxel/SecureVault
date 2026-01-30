@@ -19,6 +19,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV !== 'production';
 
 const app = Fastify({
+  requestTimeout: 10 * 60 * 1000, // 10 minutes for large file uploads
+  bodyLimit: 500 * 1024 * 1024, // 500MB max body size
   logger: isDev
     ? {
         level: process.env.LOG_LEVEL || 'info',
@@ -67,10 +69,10 @@ await app.register(rateLimit, {
   keyGenerator: (request) => request.ip,
 });
 
-// Multipart (file uploads) — no per-file size limit; only user storage quota is enforced in upload route
+// Multipart (file uploads) — optimize for large files through proxies
 await app.register(multipart, {
   limits: {
-    fileSize: 10 * 1024 * 1024 * 1024, // 10GB max per file (effectively unlimited; quota checked in /api/upload)
+    fileSize: 500 * 1024 * 1024, // 500MB max per file
   },
 });
 
