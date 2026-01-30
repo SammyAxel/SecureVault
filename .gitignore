@@ -32,9 +32,6 @@ Thumbs.db
 *.log
 npm-debug.log*
 
-# Drizzle
-drizzle/
-
 # Keys (never commit!)
 *_keys.json
 keys.json
