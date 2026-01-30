@@ -123,7 +123,24 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
   CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
   CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
+  CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
 `);
+
+// ============ MIGRATIONS ============
+// Manual migration for 'uid' column in files table
+const fileColumns = db.pragma('table_info(files)') as any[];
+const hasUid = fileColumns.some((col) => col.name === 'uid');
+
+if (!hasUid) {
+  console.log('⚡ Running migration: Adding uid column to files table...');
+  try {
+    db.exec('ALTER TABLE files ADD COLUMN uid TEXT');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_files_uid ON files(uid)');
+    console.log('✅ Migration successful: uid column added');
+  } catch (error) {
+    console.error('❌ Migration failed:', error);
+  }
+}
 
 console.log('✅ Database tables created successfully!');
 db.close();
