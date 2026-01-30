@@ -40,16 +40,21 @@ export default function FileViewer(props: FileViewerProps) {
 
   // Load file/folder by UID
   const loadFileByUid = async (uid: string) => {
+    console.log('[FileViewer] Loading UID:', uid);
     setIsLoading(true);
     setError(null);
+    setFile(null); // Clear previous file
     setPreviewUrl(null); // Clear previous preview
     setFolderContents([]); // Clear previous folder contents
     setParentPath([]); // Clear previous parent path
     
     try {
+      console.log('[FileViewer] Calling API...');
       const result = await api.getFileByUid(uid);
+      console.log('[FileViewer] API result:', result);
       
       if (!result.ok) {
+        console.log('[FileViewer] Result not OK');
         setErrorType('notfound');
         setError('File or folder not found');
         setIsLoading(false);
@@ -68,7 +73,9 @@ export default function FileViewer(props: FileViewerProps) {
         await loadPreview(result.file);
       }
     } catch (err: any) {
-      console.error('FileViewer: Failed to load:', err);
+      console.error('[FileViewer] Error caught:', err);
+      console.error('[FileViewer] Error status:', err.status);
+      console.error('[FileViewer] Error message:', err.message);
       if (err.status === 403 || err.message?.includes('403') || err.message?.includes('Access denied')) {
         setErrorType('unauthorized');
         setError('You do not have access to this file');
@@ -80,6 +87,7 @@ export default function FileViewer(props: FileViewerProps) {
         setError(err.message || 'Failed to load');
       }
     } finally {
+      console.log('[FileViewer] Loading complete. Error:', error());
       setIsLoading(false);
     }
   };
@@ -288,63 +296,61 @@ export default function FileViewer(props: FileViewerProps) {
     );
   };
 
-  // Error pages
-  if (error()) {
-    return (
-      <div class="min-h-screen bg-gray-900 flex items-center justify-center p-4">
-        <div class="bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-8 text-center">
-          <Show when={errorType() === 'unauthorized'}>
-            <div class="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg class="w-10 h-10 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-            </div>
-            <h1 class="text-2xl font-bold text-white mb-2">Access Denied</h1>
-            <p class="text-gray-400 mb-6">You don't have permission to view this file or folder.</p>
-          </Show>
-          
-          <Show when={errorType() === 'notfound'}>
-            <div class="w-20 h-20 bg-yellow-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg class="w-10 h-10 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <h1 class="text-2xl font-bold text-white mb-2">Not Found</h1>
-            <p class="text-gray-400 mb-6">This file or folder doesn't exist or has been deleted.</p>
-          </Show>
-          
-          <Show when={errorType() === 'error'}>
-            <div class="w-20 h-20 bg-gray-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg class="w-10 h-10 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <h1 class="text-2xl font-bold text-white mb-2">Something Went Wrong</h1>
-            <p class="text-gray-400 mb-6">{error()}</p>
-          </Show>
-          
-          <div class="flex gap-3 justify-center">
-            <button
-              onClick={goToDrive}
-              class="px-6 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-medium transition-colors"
-            >
-              Go to My Drive
-            </button>
-          </div>
-          
-          <p class="text-gray-500 text-sm mt-6">
-            🔒 SecureVault • End-to-End Encrypted
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <>
       {/* Loading state */}
       <Show when={isLoading()}>
         <SkeletonFileViewer />
+      </Show>
+
+      {/* Error state */}
+      <Show when={!isLoading() && error()}>
+        <div class="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+          <div class="bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-8 text-center">
+            <Show when={errorType() === 'unauthorized'}>
+              <div class="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                <svg class="w-10 h-10 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              </div>
+              <h1 class="text-2xl font-bold text-white mb-2">Access Denied</h1>
+              <p class="text-gray-400 mb-6">You don't have permission to view this file or folder.</p>
+            </Show>
+            
+            <Show when={errorType() === 'notfound'}>
+              <div class="w-20 h-20 bg-yellow-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                <svg class="w-10 h-10 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h1 class="text-2xl font-bold text-white mb-2">Not Found</h1>
+              <p class="text-gray-400 mb-6">This file or folder doesn't exist or has been deleted.</p>
+            </Show>
+            
+            <Show when={errorType() === 'error'}>
+              <div class="w-20 h-20 bg-gray-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                <svg class="w-10 h-10 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h1 class="text-2xl font-bold text-white mb-2">Something Went Wrong</h1>
+              <p class="text-gray-400 mb-6">{error()}</p>
+            </Show>
+            
+            <div class="flex gap-3 justify-center">
+              <button
+                onClick={goToDrive}
+                class="px-6 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-medium transition-colors"
+              >
+                Go to My Drive
+              </button>
+            </div>
+            
+            <p class="text-gray-500 text-sm mt-6">
+              🔒 SecureVault • End-to-End Encrypted
+            </p>
+          </div>
+        </div>
       </Show>
 
       {/* Not found state - when loading finished but no file and no error */}
