@@ -202,6 +202,7 @@ export async function disable2FA(code: string) {
 
 export interface FileItem {
   id: string;
+  uid?: string;
   filename: string;
   fileSize: number;
   isFolder: boolean;
@@ -214,6 +215,14 @@ export interface FileItem {
 export async function listFiles(parentId?: string) {
   const query = parentId ? `?parentId=${parentId}` : '';
   return request<{ ok: boolean; files: FileItem[] }>(`/files${query}`);
+}
+
+export async function getFileByUid(uid: string) {
+  return request<{
+    ok: boolean;
+    file: FileItem;
+    parentPath: Array<{ id: string; uid: string | null; name: string }>;
+  }>(`/f/${uid}`);
 }
 
 export async function uploadFile(

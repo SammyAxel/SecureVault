@@ -36,6 +36,7 @@ export const sessions = sqliteTable('sessions', {
 // ============ FILES ============
 export const files = sqliteTable('files', {
   id: text('id').primaryKey(), // UUID
+  uid: text('uid').unique(), // Short URL-friendly ID (e.g., "abc123xyz")
   filename: text('filename').notNull(),
   ownerId: integer('owner_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   encryptedKey: text('encrypted_key').notNull(),

@@ -3,7 +3,7 @@ import { db, schema } from '../db/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { saveFile, getFile, deleteFile, getFullPath } from '../lib/storage.js';
-import { generateUUID } from '../lib/crypto.js';
+import { generateUUID, generateUID } from '../lib/crypto.js';
 import { z } from 'zod';
 import { createReadStream } from 'fs';
 import { logAudit } from './admin.js';
@@ -41,6 +41,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       ok: true,
       files: files.map(f => ({
         id: f.id,
+        uid: f.uid,
         filename: f.filename,
         fileSize: f.fileSize,
         isFolder: f.isFolder,
@@ -49,6 +50,66 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         encryptedKey: f.encryptedKey,
         iv: f.iv,
       })),
+    };
+  });
+  
+  // ============ GET FILE/FOLDER BY UID (Authenticated) ============
+  app.get('/api/f/:uid', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+    const user = request.user!;
+    const { uid } = request.params as { uid: string };
+    
+    const file = await db.query.files.findFirst({
+      where: and(
+        eq(schema.files.uid, uid),
+        eq(schema.files.isDeleted, false)
+      ),
+    });
+    
+    if (!file) {
+      return reply.status(404).send({ ok: false, msg: 'File not found' });
+    }
+    
+    // Check ownership or share access
+    if (file.ownerId !== user.id) {
+      const share = await db.query.fileShares.findFirst({
+        where: and(
+          eq(schema.fileShares.fileId, file.id),
+          eq(schema.fileShares.recipientId, user.id)
+        ),
+      });
+      
+      if (!share) {
+        return reply.status(403).send({ ok: false, msg: 'Access denied' });
+      }
+    }
+    
+    // Get parent path for navigation
+    const getParentPath = async (parentId: string | null): Promise<Array<{ id: string; uid: string | null; name: string }>> => {
+      if (!parentId) return [];
+      const parent = await db.query.files.findFirst({
+        where: eq(schema.files.id, parentId),
+      });
+      if (!parent) return [];
+      const ancestors = await getParentPath(parent.parentId);
+      return [...ancestors, { id: parent.id, uid: parent.uid, name: parent.filename }];
+    };
+    
+    const parentPath = await getParentPath(file.parentId);
+    
+    return {
+      ok: true,
+      file: {
+        id: file.id,
+        uid: file.uid,
+        filename: file.filename,
+        fileSize: file.fileSize,
+        isFolder: file.isFolder,
+        parentId: file.parentId,
+        createdAt: file.createdAt,
+        encryptedKey: file.encryptedKey,
+        iv: file.iv,
+      },
+      parentPath,
     };
   });
   
@@ -89,8 +150,10 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     
     // Save metadata to database
     const fileId = generateUUID();
+    const fileUid = generateUID();
     await db.insert(schema.files).values({
       id: fileId,
+      uid: fileUid,
       filename: data.filename,
       ownerId: user.id,
       encryptedKey,
@@ -112,12 +175,12 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       'UPLOAD',
       'FILE',
       fileId,
-      { filename: data.filename, fileSize },
+      { filename: data.filename, fileSize, uid: fileUid },
       request.ip,
       request.headers['user-agent']
     );
     
-    return { ok: true, fileId };
+    return { ok: true, fileId, uid: fileUid };
   });
   
   // ============ CREATE FOLDER ============
@@ -132,8 +195,10 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     const { name, parentId } = body.data;
     
     const folderId = generateUUID();
+    const folderUid = generateUID();
     await db.insert(schema.files).values({
       id: folderId,
+      uid: folderUid,
       filename: name,
       ownerId: user.id,
       encryptedKey: '', // Folders don't have encrypted keys
@@ -142,7 +207,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       parentId: parentId || null,
     });
     
-    return { ok: true, folderId };
+    return { ok: true, folderId, uid: folderUid };
   });
   
   // ============ DOWNLOAD FILE ============

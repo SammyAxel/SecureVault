@@ -27,17 +27,22 @@ function isPreviewable(filename: string): boolean {
   return isPreviewableFile(filename);
 }
 
-export default function Dashboard() {
+interface DashboardProps {
+  navigate?: (path: string) => void;
+}
+
+export default function Dashboard(props: DashboardProps) {
   const { user } = useAuth();
   const [files, setFiles] = createSignal<FileItem[]>([]);
   const [currentFolder, setCurrentFolder] = createSignal<string | null>(null);
-  const [folderPath, setFolderPath] = createSignal<Array<{ id: string | null; name: string }>>([{ id: null, name: 'My Files' }]);
+  const [currentFolderUid, setCurrentFolderUid] = createSignal<string | null>(null);
+  const [folderPath, setFolderPath] = createSignal<Array<{ id: string | null; uid: string | null; name: string }>>([{ id: null, uid: null, name: 'My Files' }]);
   const [isLoading, setIsLoading] = createSignal(false);
   const [isDragging, setIsDragging] = createSignal(false);
   const [uploadProgress, setUploadProgress] = createSignal<string | null>(null);
   
   // Preview state
-  const [previewFile, setPreviewFile] = createSignal<{ url: string; filename: string; mimeType: string } | null>(null);
+  const [previewFile, setPreviewFile] = createSignal<{ url: string; filename: string; mimeType: string; fileUid?: string } | null>(null);
   
   // Share modal state
   const [shareFile, setShareFile] = createSignal<FileItem | null>(null);
@@ -141,12 +146,22 @@ export default function Dashboard() {
     loadFiles();
   });
 
-  // Navigate to folder
-  const navigateToFolder = (folderId: string | null, folderName: string) => {
+  // Navigate to folder (in dashboard, use FileViewer for UID-based navigation)
+  const navigateToFolder = (folderId: string | null, folderName: string, folderUid?: string | null) => {
     if (folderId === null) {
-      setFolderPath([{ id: null, name: 'My Files' }]);
+      setFolderPath([{ id: null, uid: null, name: 'My Files' }]);
+      setCurrentFolderUid(null);
+      // Update URL to root
+      if (props.navigate) {
+        window.history.replaceState({}, '', '/');
+      }
     } else {
-      setFolderPath([...folderPath(), { id: folderId, name: folderName }]);
+      setFolderPath([...folderPath(), { id: folderId, uid: folderUid || null, name: folderName }]);
+      setCurrentFolderUid(folderUid || null);
+      // Update URL with folder UID
+      if (props.navigate && folderUid) {
+        window.history.replaceState({}, '', `/f/${folderUid}`);
+      }
     }
     setCurrentFolder(folderId);
   };
@@ -154,7 +169,17 @@ export default function Dashboard() {
   const navigateUp = (index: number) => {
     const newPath = folderPath().slice(0, index + 1);
     setFolderPath(newPath);
-    setCurrentFolder(newPath[newPath.length - 1].id);
+    const lastItem = newPath[newPath.length - 1];
+    setCurrentFolder(lastItem.id);
+    setCurrentFolderUid(lastItem.uid);
+    // Update URL
+    if (props.navigate) {
+      if (lastItem.uid) {
+        window.history.replaceState({}, '', `/f/${lastItem.uid}`);
+      } else {
+        window.history.replaceState({}, '', '/');
+      }
+    }
   };
 
   // Handle file upload
@@ -269,7 +294,11 @@ export default function Dashboard() {
       const blob = new Blob([decrypted], { type: mimeType });
       const url = URL.createObjectURL(blob);
 
-      setPreviewFile({ url, filename: file.filename, mimeType });
+      setPreviewFile({ url, filename: file.filename, mimeType, fileUid: file.uid });
+      // Update URL with file UID
+      if (props.navigate && file.uid) {
+        window.history.replaceState({}, '', `/f/${file.uid}`);
+      }
       setUploadProgress(null);
     } catch (error: any) {
       console.error('Open failed:', error);
@@ -285,6 +314,52 @@ export default function Dashboard() {
       URL.revokeObjectURL(preview.url);
     }
     setPreviewFile(null);
+    // Reset URL to current folder
+    if (props.navigate) {
+      const folderUid = currentFolderUid();
+      if (folderUid) {
+        window.history.replaceState({}, '', `/f/${folderUid}`);
+      } else {
+        window.history.replaceState({}, '', '/');
+      }
+    }
+  };
+
+  // Copy UID link to clipboard
+  const copyUIDLink = async (file: FileItem) => {
+    if (!file.uid) {
+      toast.error('UID not available for this file');
+      return;
+    }
+
+    const keys = getCurrentKeys();
+    if (!keys) {
+      toast.error('Please login again - keys not found');
+      return;
+    }
+
+    try {
+      // Download to get encryption info
+      const { encryptedKey, iv } = await api.downloadFile(file.id);
+
+      // Unwrap key
+      const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
+      const fileKey = await unwrapKey(encryptedKey, privateKey);
+
+      // Export raw key to base64
+      const rawKey = await crypto.subtle.exportKey('raw', fileKey);
+      const keyBase64 = arrayBufferToBase64(rawKey);
+
+      // Build URL with key and IV in fragment
+      const baseUrl = window.location.origin;
+      const url = `${baseUrl}/f/${file.uid}#${keyBase64}:${iv}`;
+
+      await navigator.clipboard.writeText(url);
+      toast.success('Link copied to clipboard!');
+    } catch (error: any) {
+      console.error('Failed to copy UID link:', error);
+      toast.error(`Failed to copy link: ${error.message}`);
+    }
   };
 
   // Handle delete
@@ -858,7 +933,7 @@ export default function Dashboard() {
                           {/* File/Folder name with click to preview for files */}
                           {file.isFolder ? (
                             <button
-                              onClick={() => navigateToFolder(file.id, file.filename)}
+                              onClick={() => navigateToFolder(file.id, file.filename, file.uid)}
                               class="text-white hover:text-primary-400"
                             >
                               {file.filename}
@@ -924,6 +999,18 @@ export default function Dashboard() {
                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
                             </svg>
                           </button>
+                          {/* Copy UID Link button - only for files with UID */}
+                          {!file.isFolder && file.uid && (
+                            <button
+                              onClick={() => copyUIDLink(file)}
+                              class="p-2 text-gray-400 hover:text-cyan-400 rounded-lg hover:bg-gray-700"
+                              title="Copy Direct Link"
+                            >
+                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                              </svg>
+                            </button>
+                          )}
                           {!file.isFolder && (
                             <button
                               onClick={() => handleDownload(file)}

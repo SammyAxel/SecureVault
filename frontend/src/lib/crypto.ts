@@ -425,32 +425,32 @@ export async function loadKeyBundleFromFile(file: File): Promise<EncryptedKeyBun
   return JSON.parse(text);
 }
 
-// Store keys in memory and sessionStorage (cleared when browser closes)
+// Store keys in memory and localStorage (shared across tabs)
 const KEYS_STORAGE_KEY = 'securevault_keys';
 let currentKeys: KeyBundle | null = null;
 
 export function setCurrentKeys(keys: KeyBundle): void {
   currentKeys = keys;
-  // Also save to sessionStorage for page refresh persistence
+  // Also save to localStorage for persistence across tabs
   try {
-    sessionStorage.setItem(KEYS_STORAGE_KEY, JSON.stringify(keys));
+    localStorage.setItem(KEYS_STORAGE_KEY, JSON.stringify(keys));
   } catch (e) {
-    console.warn('Failed to save keys to sessionStorage:', e);
+    console.warn('Failed to save keys to localStorage:', e);
   }
 }
 
 export function getCurrentKeys(): KeyBundle | null {
   if (currentKeys) return currentKeys;
   
-  // Try to restore from sessionStorage
+  // Try to restore from localStorage
   try {
-    const stored = sessionStorage.getItem(KEYS_STORAGE_KEY);
+    const stored = localStorage.getItem(KEYS_STORAGE_KEY);
     if (stored) {
       currentKeys = JSON.parse(stored) as KeyBundle;
       return currentKeys;
     }
   } catch (e) {
-    console.warn('Failed to restore keys from sessionStorage:', e);
+    console.warn('Failed to restore keys from localStorage:', e);
   }
   
   return null;
@@ -459,8 +459,8 @@ export function getCurrentKeys(): KeyBundle | null {
 export function clearCurrentKeys(): void {
   currentKeys = null;
   try {
-    sessionStorage.removeItem(KEYS_STORAGE_KEY);
+    localStorage.removeItem(KEYS_STORAGE_KEY);
   } catch (e) {
-    console.warn('Failed to clear keys from sessionStorage:', e);
+    console.warn('Failed to clear keys from localStorage:', e);
   }
 }

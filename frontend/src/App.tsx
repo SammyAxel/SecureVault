@@ -8,6 +8,8 @@ import AdminDashboard from './components/AdminDashboard';
 import Setup from './components/Setup';
 import ToastContainer from './components/Toast';
 import ConfirmModal from './components/ConfirmModal';
+import PublicShare from './components/PublicShare';
+import FileViewer from './components/FileViewer';
 import * as api from './lib/api';
 
 // Simple path-based routing
@@ -40,6 +42,12 @@ function AppContent() {
   
   // Check if we're on profile page
   const isProfilePage = () => path() === '/profile';
+  
+  // Extract UID from /f/:uid path
+  const getUIDFromPath = () => {
+    const match = path().match(/^\/f\/([a-zA-Z0-9]+)/);
+    return match ? match[1] : null;
+  };
 
   // Check setup status on mount
   onMount(async () => {
@@ -73,6 +81,24 @@ function AppContent() {
 
       {/* Main app */}
       <Show when={!checkingSetup() && !needsSetup()}>
+        {/* UID Route - Show dedicated file viewer */}
+        <Show when={getUIDFromPath()}>
+          <Show when={isLoading()}>
+            <div class="min-h-screen bg-gray-900 flex items-center justify-center">
+              <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
+            </div>
+          </Show>
+          <Show when={!isLoading()}>
+            <Show when={user()} fallback={
+              <UIDAccessDenied navigate={navigate} />
+            }>
+              <FileViewer uid={getUIDFromPath()!} navigate={navigate} />
+            </Show>
+          </Show>
+        </Show>
+        
+        {/* Regular Routes - Show full drive UI */}
+        <Show when={!getUIDFromPath()}>
         <div class="min-h-screen bg-gray-900">
       {/* Header */}
       <header class="bg-gray-800 border-b border-gray-700">
@@ -171,18 +197,56 @@ function AppContent() {
             
             {/* User Dashboard (default) */}
             <Show when={!isAdminPage() && !isProfilePage()}>
-              <Dashboard />
+              <Dashboard navigate={navigate} />
             </Show>
           </Show>
         </Show>
       </main>
         </div>
+        </Show>
       </Show>
     </>
   );
 }
 
+// Component shown when user is not logged in but tries to access a UID link
+function UIDAccessDenied(props: { navigate: (path: string) => void }) {
+  const [showLogin, setShowLogin] = createSignal(true);
+  
+  return (
+    <div class="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+      <div class="bg-gray-800 rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
+        <div class="bg-gradient-to-r from-primary-600 to-primary-700 px-6 py-4 text-center">
+          <div class="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3">
+            <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          </div>
+          <h1 class="text-xl font-bold text-white">Login Required</h1>
+          <p class="text-primary-100 text-sm mt-1">Sign in to access this file</p>
+        </div>
+        
+        <div class="p-6">
+          <Show when={showLogin()} fallback={
+            <Register onSwitchToLogin={() => setShowLogin(true)} />
+          }>
+            <Login onSwitchToRegister={() => setShowLogin(false)} />
+          </Show>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  // Check for public routes that don't need auth
+  const isShareRoute = () => window.location.pathname.startsWith('/share/');
+  
+  // Render public share page
+  if (isShareRoute()) {
+    return <PublicShare />;
+  }
+  
   return (
     <AuthProvider>
       <AppContent />
