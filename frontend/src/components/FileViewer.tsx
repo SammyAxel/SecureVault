@@ -40,7 +40,6 @@ export default function FileViewer(props: FileViewerProps) {
 
   // Load file/folder by UID
   const loadFileByUid = async (uid: string) => {
-    console.log('[FileViewer] Loading UID:', uid);
     setIsLoading(true);
     setError(null);
     setFile(null); // Clear previous file
@@ -49,12 +48,9 @@ export default function FileViewer(props: FileViewerProps) {
     setParentPath([]); // Clear previous parent path
     
     try {
-      console.log('[FileViewer] Calling API...');
       const result = await api.getFileByUid(uid);
-      console.log('[FileViewer] API result:', result);
       
       if (!result.ok) {
-        console.log('[FileViewer] Result not OK');
         setErrorType('notfound');
         setError('File or folder not found');
         setIsLoading(false);
@@ -73,9 +69,6 @@ export default function FileViewer(props: FileViewerProps) {
         await loadPreview(result.file);
       }
     } catch (err: any) {
-      console.error('[FileViewer] Error caught:', err);
-      console.error('[FileViewer] Error status:', err.status);
-      console.error('[FileViewer] Error message:', err.message);
       if (err.status === 403 || err.message?.includes('403') || err.message?.includes('Access denied')) {
         setErrorType('unauthorized');
         setError('You do not have access to this file');
@@ -87,7 +80,6 @@ export default function FileViewer(props: FileViewerProps) {
         setError(err.message || 'Failed to load');
       }
     } finally {
-      console.log('[FileViewer] Loading complete. Error:', error());
       setIsLoading(false);
     }
   };

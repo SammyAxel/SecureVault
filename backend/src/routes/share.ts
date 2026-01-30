@@ -4,6 +4,7 @@ import { eq, and, gt } from 'drizzle-orm';
 import { authenticate, optionalAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { generateUUID, getExpiryDate } from '../lib/crypto.js';
 import { getFile, getFullPath } from '../lib/storage.js';
+import { createNotification } from './notifications.js';
 import { z } from 'zod';
 import { createReadStream } from 'fs';
 import { logAudit } from './admin.js';
@@ -91,6 +92,16 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       { filename: file.filename, recipientUsername },
       request.ip,
       request.headers['user-agent']
+    );
+    
+    // Create notification for recipient
+    await createNotification(
+      recipient.id,
+      'file_shared',
+      'File shared with you',
+      `${user.username} shared "${file.filename}" with you`,
+      `/dashboard?file=${fileId}`,
+      { fileId, filename: file.filename, sharedBy: user.username }
     );
     
     return { ok: true };

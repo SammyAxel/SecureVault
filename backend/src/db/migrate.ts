@@ -97,6 +97,19 @@ db.exec(`
     created_at INTEGER DEFAULT (unixepoch())
   );
 
+  -- Notifications table
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    read INTEGER DEFAULT 0,
+    action_url TEXT,
+    metadata TEXT,
+    created_at INTEGER DEFAULT (unixepoch())
+  );
+
   -- Create indexes
   CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
   CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
@@ -108,6 +121,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_public_shares_token ON public_shares(token);
   CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
   CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+  CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+  CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
 `);
 
 console.log('✅ Database tables created successfully!');
