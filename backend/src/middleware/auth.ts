@@ -1,5 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { db, schema } from '../db/index.js';
+import { db, schema } from '../db/index';
 import { eq, and, gt } from 'drizzle-orm';
 
 export interface AuthenticatedRequest extends FastifyRequest {

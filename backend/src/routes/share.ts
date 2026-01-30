@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { db, schema } from '../db/index.js';
+import { db, schema } from '../db/index';
 import { eq, and, gt } from 'drizzle-orm';
 import { authenticate, optionalAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { generateUUID, getExpiryDate } from '../lib/crypto.js';
