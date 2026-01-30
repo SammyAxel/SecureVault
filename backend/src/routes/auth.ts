@@ -449,7 +449,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     
     return {
       ok: true,
-      sessions: sessions.map(s => ({
+      sessions: sessions.map((s: any) => ({
         id: s.id,
         deviceInfo: s.deviceInfo,
         ipAddress: s.ipAddress,

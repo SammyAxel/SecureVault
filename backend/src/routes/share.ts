@@ -112,8 +112,8 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     return {
       ok: true,
       files: shares
-        .filter(s => !s.file.isDeleted)
-        .map(s => ({
+        .filter((s: any) => !s.file.isDeleted)
+        .map((s: any) => ({
           id: s.file.id,
           filename: s.file.filename,
           fileSize: s.file.fileSize,
@@ -176,7 +176,7 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     
     return {
       ok: true,
-      shares: publicShares.map(s => ({
+      shares: publicShares.map((s: any) => ({
         token: s.token,
         expiresAt: s.expiresAt,
         accessCount: s.accessCount,

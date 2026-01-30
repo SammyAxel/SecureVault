@@ -34,12 +34,12 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         eq(schema.files.isDeleted, false),
         parentId ? eq(schema.files.parentId, parentId) : isNull(schema.files.parentId)
       ),
-      orderBy: (files, { desc }) => [desc(files.isFolder), desc(files.createdAt)],
+      orderBy: (files: any, { desc }: any) => [desc(files.isFolder), desc(files.createdAt)],
     });
     
     return {
       ok: true,
-      files: files.map(f => ({
+      files: files.map((f: any) => ({
         id: f.id,
         uid: f.uid,
         filename: f.filename,
@@ -341,12 +341,12 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         eq(schema.files.ownerId, user.id),
         eq(schema.files.isDeleted, true)
       ),
-      orderBy: (files, { desc }) => [desc(files.deletedAt)],
+      orderBy: (files: any, { desc }: any) => [desc(files.deletedAt)],
     });
     
     return {
       ok: true,
-      files: files.map(f => ({
+      files: files.map((f: any) => ({
         id: f.id,
         filename: f.filename,
         fileSize: f.fileSize,
@@ -463,12 +463,12 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         eq(schema.files.isFolder, true),
         eq(schema.files.isDeleted, false)
       ),
-      orderBy: (files, { asc }) => [asc(files.filename)],
+      orderBy: (files: any, { asc }: any) => [asc(files.filename)],
     });
     
     return {
       ok: true,
-      folders: folders.map(f => ({
+      folders: folders.map((f: any) => ({
         id: f.id,
         filename: f.filename,
         parentId: f.parentId,

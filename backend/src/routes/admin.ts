@@ -106,7 +106,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const offset = (pageNum - 1) * limitNum;
     
     const users = await db.query.users.findMany({
-      orderBy: (users, { desc }) => [desc(users.createdAt)],
+      orderBy: (users: any, { desc }: any) => [desc(users.createdAt)],
       limit: limitNum,
       offset,
     });
@@ -116,7 +116,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     
     return {
       ok: true,
-      users: users.map(u => ({
+      users: users.map((u: any) => ({
         id: u.id,
         username: u.username,
         isAdmin: u.isAdmin,
@@ -243,7 +243,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const offset = (pageNum - 1) * limitNum;
     
     const logs = await db.query.auditLogs.findMany({
-      orderBy: (logs, { desc }) => [desc(logs.createdAt)],
+      orderBy: (logs: any, { desc }: any) => [desc(logs.createdAt)],
       limit: limitNum,
       offset,
     });
@@ -253,7 +253,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     
     return {
       ok: true,
-      logs: logs.map(log => ({
+      logs: logs.map((log: any) => ({
         id: log.id,
         userId: log.userId,
         username: log.username,
@@ -281,14 +281,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     
     const sessions = await db.query.sessions.findMany({
       where: eq(schema.sessions.userId, userIdNum),
-      orderBy: (sessions, { desc }) => [desc(sessions.createdAt)],
+      orderBy: (sessions: any, { desc }: any) => [desc(sessions.createdAt)],
     });
     
     const now = new Date();
     
     return {
       ok: true,
-      sessions: sessions.map(s => ({
+      sessions: sessions.map((s: any) => ({
         id: s.id,
         deviceInfo: s.deviceInfo,
         ipAddress: s.ipAddress,
