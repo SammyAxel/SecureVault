@@ -221,7 +221,13 @@ export default function Dashboard(props: DashboardProps) {
         loadFiles();
       } catch (error: any) {
         console.error('Upload failed:', error);
-        toast.error(`Failed to upload ${file.name}: ${error.message}`);
+        if (error?.data?.quotaExceeded) {
+          toast.error(error.message); // e.g. "Storage quota exceeded. You have X bytes remaining."
+        } else if (error?.data?.malwareDetected) {
+          toast.error(`Upload blocked: ${error.message}`);
+        } else {
+          toast.error(`Failed to upload ${file.name}: ${error.message}`);
+        }
         setUploadProgress(null);
       }
     }
@@ -693,6 +699,7 @@ export default function Dashboard(props: DashboardProps) {
             <input
               type="file"
               multiple
+              accept="*/*"
               class="hidden"
               onChange={(e) => e.target.files && handleUpload(e.target.files)}
             />

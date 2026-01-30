@@ -110,6 +110,12 @@ db.exec(`
     created_at INTEGER DEFAULT (unixepoch())
   );
 
+  -- Settings table (key-value for VirusTotal API key, etc.)
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  );
+
   -- Create indexes
   CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
   CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
@@ -167,6 +173,24 @@ if (!hasColumn('users', 'display_name')) {
     console.log('✅ Migration successful: display_name column added');
   } catch (error) {
     console.error('❌ Migration failed (display_name):', error);
+    throw error;
+  }
+}
+
+// Migration 4: Create settings table if not exists
+const tableList = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'").all() as { name: string }[];
+if (tableList.length === 0) {
+  console.log('⚡ Running migration: Creating settings table...');
+  try {
+    db.exec(`
+      CREATE TABLE settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      );
+    `);
+    console.log('✅ Migration successful: settings table created');
+  } catch (error) {
+    console.error('❌ Migration failed (settings):', error);
     throw error;
   }
 }

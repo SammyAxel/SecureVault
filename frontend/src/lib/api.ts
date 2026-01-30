@@ -1,7 +1,11 @@
 const API_BASE = '/api';
 
 class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+    public data?: { quotaExceeded?: boolean }
+  ) {
     super(message);
     this.name = 'ApiError';
   }
@@ -35,7 +39,7 @@ async function request<T>(
   const data = text ? JSON.parse(text) : {};
   
   if (!response.ok) {
-    throw new ApiError(response.status, data.msg || 'Request failed');
+    throw new ApiError(response.status, data.msg || 'Request failed', data);
   }
   
   return data;
@@ -50,11 +54,17 @@ export async function checkSetupStatus() {
 export async function setupAdmin(
   username: string,
   publicKey: string,
-  encryptionPublicKey: string
+  encryptionPublicKey: string,
+  virusTotalApiKey?: string
 ) {
   return request<{ ok: boolean; userId: number; username: string; isAdmin: boolean }>('/setup/admin', {
     method: 'POST',
-    body: JSON.stringify({ username, publicKey, encryptionPublicKey }),
+    body: JSON.stringify({
+      username,
+      publicKey,
+      encryptionPublicKey,
+      ...(virusTotalApiKey !== undefined && virusTotalApiKey !== '' && { virusTotalApiKey: virusTotalApiKey.trim() }),
+    }),
   });
 }
 
@@ -472,6 +482,17 @@ export async function updateUserQuota(userId: number, quota: number) {
   return request<{ ok: boolean; quota: number }>(`/admin/users/${userId}/quota`, {
     method: 'PATCH',
     body: JSON.stringify({ quota }),
+  });
+}
+
+export async function getAdminSettings() {
+  return request<{ ok: boolean; virusTotalConfigured: boolean }>('/admin/settings');
+}
+
+export async function updateAdminSettings(settings: { virusTotalApiKey?: string }) {
+  return request<{ ok: boolean; virusTotalConfigured: boolean }>('/admin/settings', {
+    method: 'PATCH',
+    body: JSON.stringify(settings),
   });
 }
 

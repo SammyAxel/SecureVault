@@ -131,6 +131,7 @@ export const AuthProvider: ParentComponent = (props) => {
     clearCurrentKeys(); // Clear encryption keys from memory and sessionStorage
     setToken(null);
     setUser(null);
+    window.dispatchEvent(new CustomEvent('auth:logout'));
   };
 
   const updateUser = (updates: Partial<User>) => {

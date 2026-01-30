@@ -49,17 +49,48 @@ function AppContent() {
     return match ? match[1] : null;
   };
 
-  // Check setup status on mount
-  onMount(async () => {
-    try {
-      const status = await api.checkSetupStatus();
-      setNeedsSetup(status.needsSetup);
-    } catch (err) {
-      console.error('Failed to check setup status:', err);
-      setNeedsSetup(false); // Assume setup is done if check fails
-    } finally {
-      setCheckingSetup(false);
+  // Sync path with login/register view: /login -> Login, /register -> Register
+  createEffect(() => {
+    const p = path();
+    if (p === '/login') setShowRegister(false);
+    else if (p === '/register') setShowRegister(true);
+  });
+
+  // After login (or when already logged in on auth pages), redirect to home so URL is proper
+  createEffect(() => {
+    if (!user()) return;
+    const p = path();
+    if (p === '/login' || p === '/register') navigate('/');
+  });
+
+  // When not logged in and on a protected path (e.g. /), redirect to /login
+  createEffect(() => {
+    if (checkingSetup() || needsSetup()) return;
+    if (user() || getUIDFromPath()) return;
+    const p = path();
+    if (p === '/' || p === '/admin' || p === '/profile') {
+      navigate('/login');
     }
+  });
+
+  // Check setup status and register auth:logout listener on mount
+  onMount(() => {
+    const handleLogout = () => navigate('/login');
+    window.addEventListener('auth:logout', handleLogout);
+
+    (async () => {
+      try {
+        const status = await api.checkSetupStatus();
+        setNeedsSetup(status.needsSetup);
+      } catch (err) {
+        console.error('Failed to check setup status:', err);
+        setNeedsSetup(false);
+      } finally {
+        setCheckingSetup(false);
+      }
+    })();
+
+    return () => window.removeEventListener('auth:logout', handleLogout);
   });
 
   return (
@@ -180,9 +211,9 @@ function AppContent() {
         <Show when={!isLoading()}>
           <Show when={user()} fallback={
             <Show when={showRegister()} fallback={
-              <Login onSwitchToRegister={() => setShowRegister(true)} />
+              <Login onSwitchToRegister={() => navigate('/register')} />
             }>
-              <Register onSwitchToLogin={() => setShowRegister(false)} />
+              <Register onSwitchToLogin={() => navigate('/login')} />
             </Show>
           }>
             {/* Profile Page */}
@@ -192,7 +223,7 @@ function AppContent() {
             
             {/* Admin Dashboard */}
             <Show when={isAdminPage() && user()?.isAdmin && !isProfilePage()}>
-              <AdminDashboard />
+              <AdminDashboard navigate={navigate} />
             </Show>
             
             {/* User Dashboard (default) */}

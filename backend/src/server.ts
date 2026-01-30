@@ -67,10 +67,10 @@ await app.register(rateLimit, {
   keyGenerator: (request) => request.ip,
 });
 
-// Multipart (file uploads)
+// Multipart (file uploads) — no per-file size limit; only user storage quota is enforced in upload route
 await app.register(multipart, {
   limits: {
-    fileSize: 100 * 1024 * 1024, // 100MB max file size
+    fileSize: 10 * 1024 * 1024 * 1024, // 10GB max per file (effectively unlimited; quota checked in /api/upload)
   },
 });
 

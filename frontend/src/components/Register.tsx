@@ -84,6 +84,7 @@ export default function Register(props: RegisterProps) {
       downloadKeyBundle(bundle, username());
 
       setSuccess(true);
+      props.onSwitchToLogin();
     } catch (err: any) {
       setError(err.message || 'Registration failed');
     } finally {

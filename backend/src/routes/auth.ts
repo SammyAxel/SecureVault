@@ -7,6 +7,7 @@ import QRCode from 'qrcode';
 import { z } from 'zod';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { logAudit } from './admin.js';
+import { setVirusTotalApiKey } from '../lib/virustotal.js';
 
 // Temporary challenge storage (in production, use Redis)
 const pendingChallenges = new Map<string, { challenge: string; expires: number }>();
@@ -44,6 +45,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ============ INITIAL SETUP (Create First Admin) ============
+  const setupAdminSchema = registerSchema.extend({
+    virusTotalApiKey: z.string().max(500).optional(),
+  });
+
   app.post('/api/setup/admin', async (request, reply) => {
     // Check if setup is still needed
     const hasAdmin = await db.query.users.findFirst({
@@ -54,12 +59,12 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ ok: false, msg: 'Admin already exists. Setup is complete.' });
     }
     
-    const body = registerSchema.safeParse(request.body);
+    const body = setupAdminSchema.safeParse(request.body);
     if (!body.success) {
       return reply.status(400).send({ ok: false, msg: 'Invalid request', errors: body.error.errors });
     }
     
-    const { username, publicKey, encryptionPublicKey } = body.data;
+    const { username, publicKey, encryptionPublicKey, virusTotalApiKey } = body.data;
     
     // Check if username exists
     const existing = await db.query.users.findFirst({
@@ -78,6 +83,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       isAdmin: true, // First user is admin!
       storageQuota: 5 * 1024 * 1024 * 1024, // 5GB for admin
     }).returning();
+    
+    // Save VirusTotal API key if provided (optional malware scan on upload)
+    if (virusTotalApiKey !== undefined) {
+      await setVirusTotalApiKey(virusTotalApiKey.trim() || null);
+    }
     
     // Log audit
     await logAudit(

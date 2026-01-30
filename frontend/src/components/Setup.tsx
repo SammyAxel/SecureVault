@@ -32,6 +32,7 @@ export default function Setup(props: SetupProps) {
   const [password, setPassword] = createSignal('');
   const [confirmPassword, setConfirmPassword] = createSignal('');
   const [showPassword, setShowPassword] = createSignal(false);
+  const [virusTotalApiKey, setVirusTotalApiKey] = createSignal('');
   const [error, setError] = createSignal('');
   const [isLoading, setIsLoading] = createSignal(false);
 
@@ -74,11 +75,12 @@ export default function Setup(props: SetupProps) {
       // Generate password-encrypted key bundle
       const { bundle, plainKeys } = await generateEncryptedKeyBundle(password());
 
-      // Create admin account
+      // Create admin account (optional VirusTotal API key for malware scan on upload)
       await api.setupAdmin(
         username(),
         plainKeys.signingPublicKey,
-        plainKeys.encryptionPublicKey
+        plainKeys.encryptionPublicKey,
+        virusTotalApiKey().trim() || undefined
       );
 
       // Download encrypted keys
@@ -233,6 +235,21 @@ export default function Setup(props: SetupProps) {
                 </Show>
                 <p class="text-gray-500 text-xs mt-1">
                   This password encrypts your private keys. Choose wisely!
+                </p>
+              </div>
+
+              <div class="mb-4">
+                <label class="block text-gray-400 text-sm mb-2">VirusTotal API key (optional)</label>
+                <input
+                  type="password"
+                  value={virusTotalApiKey()}
+                  onInput={(e) => setVirusTotalApiKey(e.currentTarget.value)}
+                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500"
+                  placeholder="Leave empty to skip malware scan"
+                  autocomplete="off"
+                />
+                <p class="text-gray-500 text-xs mt-1">
+                  Enables malware scanning on upload via VirusTotal. You can add or change this later in Admin → Settings.
                 </p>
               </div>
 

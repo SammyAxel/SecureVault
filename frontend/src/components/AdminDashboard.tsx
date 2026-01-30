@@ -5,9 +5,13 @@ import type { AdminStats, AdminUser, AuditLogEntry, UserSession } from '../lib/a
 import { toast } from '../stores/toast';
 import { openConfirm } from '../stores/confirm';
 
-type TabType = 'overview' | 'users' | 'audit';
+type TabType = 'overview' | 'users' | 'audit' | 'settings';
 
-export default function AdminDashboard() {
+interface AdminDashboardProps {
+  navigate: (path: string) => void;
+}
+
+export default function AdminDashboard(props: AdminDashboardProps) {
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = createSignal<TabType>('overview');
   const [stats, setStats] = createSignal<AdminStats | null>(null);
@@ -28,6 +32,11 @@ export default function AdminDashboard() {
   // Quota edit modal
   const [quotaUser, setQuotaUser] = createSignal<AdminUser | null>(null);
   const [newQuota, setNewQuota] = createSignal('');
+
+  // Admin settings (VirusTotal)
+  const [virusTotalConfigured, setVirusTotalConfigured] = createSignal(false);
+  const [virusTotalApiKeyInput, setVirusTotalApiKeyInput] = createSignal('');
+  const [settingsSaving, setSettingsSaving] = createSignal(false);
 
   // Load stats
   const loadStats = async () => {
@@ -51,6 +60,32 @@ export default function AdminDashboard() {
       console.error('Failed to load users:', error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Load admin settings (VirusTotal status)
+  const loadAdminSettings = async () => {
+    try {
+      const result = await api.getAdminSettings();
+      setVirusTotalConfigured(result.virusTotalConfigured);
+    } catch (error) {
+      console.error('Failed to load admin settings:', error);
+    }
+  };
+
+  const handleSaveVirusTotalApiKey = async () => {
+    setSettingsSaving(true);
+    try {
+      const result = await api.updateAdminSettings({
+        virusTotalApiKey: virusTotalApiKeyInput().trim() || undefined,
+      });
+      setVirusTotalConfigured(result.virusTotalConfigured);
+      setVirusTotalApiKeyInput('');
+      toast.success(result.virusTotalConfigured ? 'VirusTotal API key saved' : 'VirusTotal API key removed');
+    } catch (error: any) {
+      toast.error(`Failed to save: ${error.message}`);
+    } finally {
+      setSettingsSaving(false);
     }
   };
 
@@ -173,6 +208,8 @@ export default function AdminDashboard() {
       loadUsers(1);
     } else if (tab === 'audit') {
       loadAuditLogs(1);
+    } else if (tab === 'settings') {
+      loadAdminSettings();
     }
   });
 
@@ -185,7 +222,7 @@ export default function AdminDashboard() {
           <p class="text-gray-400 mt-1">Manage users, view statistics, and audit logs</p>
         </div>
         <button
-          onClick={() => window.location.pathname = '/'}
+          onClick={() => props.navigate('/')}
           class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm flex items-center gap-2"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -226,6 +263,16 @@ export default function AdminDashboard() {
           }`}
         >
           Audit Logs
+        </button>
+        <button
+          onClick={() => setActiveTab('settings')}
+          class={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+            activeTab() === 'settings'
+              ? 'border-primary-500 text-primary-400'
+              : 'border-transparent text-gray-400 hover:text-white'
+          }`}
+        >
+          Settings
         </button>
       </div>
 
@@ -535,6 +582,46 @@ export default function AdminDashboard() {
               </div>
             </Show>
           </Show>
+        </div>
+      </Show>
+
+      {/* Settings Tab */}
+      <Show when={activeTab() === 'settings'}>
+        <div class="space-y-6 max-w-2xl">
+          <div class="bg-gray-800 rounded-xl p-6">
+            <h3 class="text-lg font-semibold text-white mb-2">VirusTotal Malware Scan</h3>
+            <p class="text-gray-400 text-sm mb-4">
+              When configured, uploaded files are scanned with VirusTotal before being stored. Infected files are blocked.
+            </p>
+            <div class="flex items-center gap-3 mb-4">
+              <span class={`px-3 py-1 rounded-full text-sm ${
+                virusTotalConfigured() ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-400'
+              }`}>
+                {virusTotalConfigured() ? 'Configured' : 'Not set'}
+              </span>
+            </div>
+            <div class="space-y-2">
+              <label class="block text-gray-400 text-sm">API key</label>
+              <input
+                type="password"
+                value={virusTotalApiKeyInput()}
+                onInput={(e) => setVirusTotalApiKeyInput(e.currentTarget.value)}
+                class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500 font-mono text-sm"
+                placeholder={virusTotalConfigured() ? 'Enter new key to replace, or leave empty' : 'Paste your VirusTotal API key'}
+                autocomplete="off"
+              />
+              <p class="text-gray-500 text-xs">
+                Get a free API key at <a href="https://www.virustotal.com/gui/my-apikey" target="_blank" rel="noopener noreferrer" class="text-primary-400 hover:underline">virustotal.com</a>. Free tier: 4 requests/minute. Files &gt;32MB are not scanned.
+              </p>
+            </div>
+            <button
+              onClick={handleSaveVirusTotalApiKey}
+              disabled={settingsSaving()}
+              class="mt-4 px-4 py-2 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 text-white rounded-lg text-sm transition-colors"
+            >
+              {settingsSaving() ? 'Saving...' : 'Save'}
+            </button>
+          </div>
         </div>
       </Show>
 

@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { db, schema } from '../db/index.js';
 import { eq, desc, sql, count, sum, and, gte } from 'drizzle-orm';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
+import { getVirusTotalApiKey, setVirusTotalApiKey } from '../lib/virustotal.js';
 import { z } from 'zod';
 
 // Admin middleware - checks if user is admin
@@ -48,8 +49,36 @@ const updateQuotaSchema = z.object({
   quota: z.number().min(0),
 });
 
+const adminSettingsSchema = z.object({
+  virusTotalApiKey: z.string().max(500).optional(),
+});
+
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   
+  // ============ ADMIN SETTINGS (VirusTotal etc.) ============
+  app.get('/api/admin/settings', { preHandler: requireAdmin }, async (_request: AuthenticatedRequest, reply) => {
+    const apiKey = await getVirusTotalApiKey();
+    return {
+      ok: true,
+      virusTotalConfigured: !!(apiKey && apiKey.length > 0),
+    };
+  });
+
+  app.patch('/api/admin/settings', { preHandler: requireAdmin }, async (request: AuthenticatedRequest, reply) => {
+    const body = adminSettingsSchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid request' });
+    }
+    if (body.data.virusTotalApiKey !== undefined) {
+      await setVirusTotalApiKey(body.data.virusTotalApiKey?.trim() || null);
+    }
+    const apiKey = await getVirusTotalApiKey();
+    return {
+      ok: true,
+      virusTotalConfigured: !!(apiKey && apiKey.length > 0),
+    };
+  });
+
   // ============ ADMIN DASHBOARD STATS ============
   app.get('/api/admin/stats', { preHandler: requireAdmin }, async (request: AuthenticatedRequest, reply) => {
     // Get total users count

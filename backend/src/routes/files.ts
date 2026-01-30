@@ -3,6 +3,7 @@ import { db, schema } from '../db/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { saveFile, getFile, deleteFile, getFullPath } from '../lib/storage.js';
+import { scanFile as virusTotalScan } from '../lib/virustotal.js';
 import { generateUUID, generateUID } from '../lib/crypto.js';
 import { z } from 'zod';
 import { createReadStream } from 'fs';
@@ -144,7 +145,17 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     if (!encryptedKey || !iv) {
       return reply.status(400).send({ ok: false, msg: 'Missing encryption metadata' });
     }
-    
+
+    // Malware scan (VirusTotal) if configured
+    const scanResult = await virusTotalScan(buffer, data.filename);
+    if (!scanResult.safe) {
+      return reply.status(400).send({
+        ok: false,
+        msg: scanResult.error ?? `File flagged as malicious (${scanResult.malicious ?? 0} engines). Upload blocked.`,
+        malwareDetected: true,
+      });
+    }
+
     // Save file to storage
     const { relativePath } = await saveFile(user.id, buffer);
     
