@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { db, schema } from '../db/index';
+import { db, schema } from '../db/index.js';
 import { eq, desc, sql, count, sum, and, gte } from 'drizzle-orm';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { z } from 'zod';

@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { db, schema } from '../db/index';
+import { db, schema } from '../db/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { saveFile, getFile, deleteFile, getFullPath } from '../lib/storage.js';
