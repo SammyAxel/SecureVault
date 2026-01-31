@@ -4,6 +4,7 @@ import * as api from '../lib/api';
 import type { FileItem } from '../lib/api';
 import ShareModal from './ShareModal';
 import NotificationCenter from './NotificationCenter';
+import Breadcrumb from './Breadcrumb';
 import { toast } from '../stores/toast';
 import { openConfirm } from '../stores/confirm';
 import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile, getFileExtension } from './FilePreview';
@@ -687,21 +688,7 @@ export default function Dashboard(props: DashboardProps) {
       <div class="flex items-center justify-between mb-6">
         <div class="flex items-center gap-4">
           {/* Breadcrumb */}
-          <nav class="flex items-center gap-2 text-sm">
-            <For each={folderPath()}>
-              {(item, index) => (
-                <>
-                  {index() > 0 && <span class="text-gray-500">/</span>}
-                  <button
-                    onClick={() => navigateUp(index())}
-                    class={`hover:text-primary-400 ${index() === folderPath().length - 1 ? 'text-white font-medium' : 'text-gray-400'}`}
-                  >
-                    {item.name}
-                  </button>
-                </>
-              )}
-            </For>
-          </nav>
+          <Breadcrumb items={folderPath()} onNavigate={navigateUp} />
         </div>
 
         <div class="flex items-center gap-3">
