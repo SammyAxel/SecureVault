@@ -81,7 +81,7 @@ export async function register(
   });
 }
 
-export async function getChallenge(username: string) {
+export async function getChallenge(username: string, deviceFingerprint?: string) {
   return request<{
     ok: boolean;
     challenge: string;
@@ -89,7 +89,7 @@ export async function getChallenge(username: string) {
     requires2FA: boolean;
   }>('/auth/challenge', {
     method: 'POST',
-    body: JSON.stringify({ username }),
+    body: JSON.stringify({ username, deviceFingerprint }),
   });
 }
 
@@ -97,7 +97,12 @@ export async function verifyLogin(
   username: string,
   challengeId: string,
   signature: string,
-  totp?: string
+  totp?: string,
+  trustDevice?: boolean,
+  deviceFingerprint?: string,
+  deviceName?: string,
+  browser?: string,
+  os?: string
 ) {
   return request<{
     ok: boolean;
@@ -112,7 +117,17 @@ export async function verifyLogin(
     };
   }>('/auth/verify', {
     method: 'POST',
-    body: JSON.stringify({ username, challengeId, signature, totp }),
+    body: JSON.stringify({ 
+      username, 
+      challengeId, 
+      signature, 
+      totp, 
+      trustDevice, 
+      deviceFingerprint, 
+      deviceName, 
+      browser, 
+      os 
+    }),
   });
 }
 
@@ -601,6 +616,36 @@ export async function deleteNotification(id: number) {
 
 export async function clearAllNotifications() {
   return request<{ ok: boolean }>(`/notifications`, {
+    method: 'DELETE',
+  });
+}
+
+// ============ TRUSTED DEVICES ============
+export interface TrustedDevice {
+  id: number;
+  deviceName: string;
+  browser: string | null;
+  os: string | null;
+  ipAddress: string | null;
+  lastUsed: Date;
+  createdAt: Date;
+}
+
+export async function getTrustedDevices() {
+  return request<{
+    ok: boolean;
+    devices: TrustedDevice[];
+  }>('/trusted-devices');
+}
+
+export async function removeTrustedDevice(id: number) {
+  return request<{ ok: boolean; msg: string }>(`/trusted-devices/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function removeAllTrustedDevices() {
+  return request<{ ok: boolean; msg: string }>('/trusted-devices', {
     method: 'DELETE',
   });
 }

@@ -10,6 +10,7 @@ import {
   type KeyBundle,
   type EncryptedKeyBundle,
 } from '../lib/crypto';
+import { getFullDeviceInfo } from '../lib/deviceFingerprint';
 
 interface LoginProps {
   onSwitchToRegister: () => void;
@@ -29,6 +30,7 @@ export default function Login(props: LoginProps) {
   const [error, setError] = createSignal('');
   const [isLoading, setIsLoading] = createSignal(false);
   const [decryptingKeys, setDecryptingKeys] = createSignal(false);
+  const [trustDevice, setTrustDevice] = createSignal(false);
 
   const handleKeyFileChange = async (e: Event) => {
     const input = e.target as HTMLInputElement;
@@ -64,8 +66,11 @@ export default function Login(props: LoginProps) {
     setIsLoading(true);
 
     try {
-      // Step 1: Get challenge
-      const { challenge, challengeId, requires2FA: needs2FA } = await api.getChallenge(username());
+      // Get device fingerprint to check if trusted
+      const deviceInfo = await getFullDeviceInfo();
+      
+      // Step 1: Get challenge (with fingerprint to check trusted device)
+      const { challenge, challengeId, requires2FA: needs2FA } = await api.getChallenge(username(), deviceInfo.fingerprint);
       
       setRequires2FA(needs2FA);
       setChallengeData({ challenge, challengeId });
@@ -117,12 +122,20 @@ export default function Login(props: LoginProps) {
       const privateKey = await importSigningPrivateKey(keys.signingPrivateKey);
       const signature = await signChallenge(privateKey, challenge);
 
+      // Always get device info for trusted device check
+      const deviceInfo = await getFullDeviceInfo();
+
       // Verify with server
       const result = await api.verifyLogin(
         username(),
         challengeId,
         signature,
-        totp() || undefined
+        totp() || undefined,
+        trustDevice() && requires2FA(), // Only trust if checkbox checked and 2FA enabled
+        deviceInfo.fingerprint,
+        deviceInfo.deviceName,
+        deviceInfo.browser,
+        deviceInfo.os
       );
 
       // Store keys in memory
@@ -240,18 +253,37 @@ export default function Login(props: LoginProps) {
           </Show>
 
           {requires2FA() && challengeData() && (
-            <div class="mb-4">
-              <label class="block text-gray-400 text-sm mb-2">2FA Code</label>
-              <input
-                type="text"
-                value={totp()}
-                onInput={(e) => setTotp(e.currentTarget.value)}
-                class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500 text-center text-2xl tracking-widest"
-                placeholder="000000"
-                maxLength={6}
-                required
-              />
-            </div>
+            <>
+              <div class="mb-4">
+                <label class="block text-gray-400 text-sm mb-2">2FA Code</label>
+                <input
+                  type="text"
+                  value={totp()}
+                  onInput={(e) => setTotp(e.currentTarget.value)}
+                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500 text-center text-2xl tracking-widest"
+                  placeholder="000000"
+                  maxLength={6}
+                  required
+                />
+              </div>
+              
+              <div class="mb-4">
+                <label class="flex items-center gap-2 cursor-pointer group">
+                  <input
+                    type="checkbox"
+                    checked={trustDevice()}
+                    onChange={(e) => setTrustDevice(e.currentTarget.checked)}
+                    class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-primary-500 focus:ring-primary-500 focus:ring-offset-gray-800"
+                  />
+                  <span class="text-gray-400 text-sm group-hover:text-gray-300">
+                    Remember this device for 30 days
+                  </span>
+                </label>
+                <p class="text-gray-500 text-xs mt-1 ml-6">
+                  You won't need to enter 2FA code on this device
+                </p>
+              </div>
+            </>
           )}
 
           <button

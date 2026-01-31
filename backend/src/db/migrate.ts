@@ -110,6 +110,19 @@ db.exec(`
     created_at INTEGER DEFAULT (unixepoch())
   );
 
+  -- Trusted devices table
+  CREATE TABLE IF NOT EXISTS trusted_devices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_fingerprint TEXT NOT NULL,
+    device_name TEXT NOT NULL,
+    browser TEXT,
+    os TEXT,
+    ip_address TEXT,
+    last_used INTEGER DEFAULT (unixepoch()),
+    created_at INTEGER DEFAULT (unixepoch())
+  );
+
   -- Settings table (key-value for VirusTotal API key, etc.)
   CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
@@ -129,6 +142,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
   CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
   CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
+  CREATE INDEX IF NOT EXISTS idx_trusted_devices_user ON trusted_devices(user_id);
+  CREATE INDEX IF NOT EXISTS idx_trusted_devices_fingerprint ON trusted_devices(device_fingerprint);
 `);
 
 console.log('✅ Database tables created/verified');
