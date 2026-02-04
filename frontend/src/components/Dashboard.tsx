@@ -4,6 +4,7 @@ import * as api from '../lib/api';
 import type { FileItem } from '../lib/api';
 import ShareModal from './ShareModal';
 import NotificationCenter from './NotificationCenter';
+import Breadcrumb from './Breadcrumb';
 import { toast } from '../stores/toast';
 import { openConfirm } from '../stores/confirm';
 import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile, getFileExtension } from './FilePreview';
@@ -74,6 +75,10 @@ export default function Dashboard(props: DashboardProps) {
   const [filterType, setFilterType] = createSignal<'all' | 'images' | 'documents' | 'videos' | 'audio' | 'folders'>('all');
   const [sortBy, setSortBy] = createSignal<'name' | 'date' | 'size'>('name');
   const [sortOrder, setSortOrder] = createSignal<'asc' | 'desc'>('asc');
+
+  // Action menu dropdown state
+  const [openMenuId, setOpenMenuId] = createSignal<string | null>(null);
+  const [menuPosition, setMenuPosition] = createSignal<{ top: number; left: number } | null>(null);
 
   // File type detection helpers
   const getFileCategory = (filename: string, isFolder: boolean): string => {
@@ -146,6 +151,19 @@ export default function Dashboard(props: DashboardProps) {
 
   createEffect(() => {
     loadFiles();
+  });
+
+  // Close menu when clicking outside
+  createEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (openMenuId() && !target.closest('.action-menu-container')) {
+        setOpenMenuId(null);
+        setMenuPosition(null);
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
   });
 
   // Navigate to folder (in dashboard, use FileViewer for UID-based navigation)
@@ -670,21 +688,7 @@ export default function Dashboard(props: DashboardProps) {
       <div class="flex items-center justify-between mb-6">
         <div class="flex items-center gap-4">
           {/* Breadcrumb */}
-          <nav class="flex items-center gap-2 text-sm">
-            <For each={folderPath()}>
-              {(item, index) => (
-                <>
-                  {index() > 0 && <span class="text-gray-500">/</span>}
-                  <button
-                    onClick={() => navigateUp(index())}
-                    class={`hover:text-primary-400 ${index() === folderPath().length - 1 ? 'text-white font-medium' : 'text-gray-400'}`}
-                  >
-                    {item.name}
-                  </button>
-                </>
-              )}
-            </For>
-          </nav>
+          <Breadcrumb items={folderPath()} onNavigate={navigateUp} />
         </div>
 
         <div class="flex items-center gap-3">
@@ -896,23 +900,24 @@ export default function Dashboard(props: DashboardProps) {
         </Show>
 
         <Show when={!isLoading() && filteredFiles().length > 0}>
-          <div class="overflow-hidden rounded-lg border border-gray-700">
-            <table class="w-full">
-              <thead class="bg-gray-800">
-                <tr>
-                  <th class="w-10 px-4 py-3">
-                    <input
-                      type="checkbox"
-                      checked={selectedFiles().size === filteredFiles().length && filteredFiles().length > 0}
-                      onChange={toggleSelectAll}
-                      class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-primary-500 focus:ring-primary-500 focus:ring-offset-gray-800 cursor-pointer"
-                    />
-                  </th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Name</th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Size</th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Date</th>
-                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-400 uppercase">Actions</th>
-                </tr>
+          <div class="rounded-lg border border-gray-700">
+            <div class="overflow-x-auto">
+              <table class="w-full">
+                <thead class="bg-gray-800">
+                  <tr>
+                    <th class="w-10 px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedFiles().size === filteredFiles().length && filteredFiles().length > 0}
+                        onChange={toggleSelectAll}
+                        class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-primary-500 focus:ring-primary-500 focus:ring-offset-gray-800 cursor-pointer"
+                      />
+                    </th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Name</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Size</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Date</th>
+                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-400 uppercase">Actions</th>
+                  </tr>
               </thead>
               <tbody class="divide-y divide-gray-700">
                 <For each={filteredFiles()}>
@@ -974,79 +979,27 @@ export default function Dashboard(props: DashboardProps) {
                         {new Date(file.createdAt).toLocaleDateString()}
                       </td>
                       <td class="px-4 py-3 text-right">
-                        <div class="flex items-center justify-end gap-2">
-                          {!file.isFolder && isPreviewable(file.filename) && (
-                            <button
-                              onClick={() => handleOpen(file)}
-                              class="p-2 text-gray-400 hover:text-primary-400 rounded-lg hover:bg-gray-700"
-                              title="Open/Preview"
-                            >
-                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                              </svg>
-                            </button>
-                          )}
-                          {/* Rename button */}
+                        <div class="relative action-menu-container">
                           <button
-                            onClick={() => openRenameModal(file)}
-                            class="p-2 text-gray-400 hover:text-yellow-400 rounded-lg hover:bg-gray-700"
-                            title="Rename"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (openMenuId() === file.id) {
+                                setOpenMenuId(null);
+                                setMenuPosition(null);
+                              } else {
+                                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                setMenuPosition({ 
+                                  top: rect.bottom + 4, 
+                                  left: rect.right - 192 // 192px = w-48
+                                });
+                                setOpenMenuId(file.id);
+                              }
+                            }}
+                            class="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-700"
+                            title="Actions"
                           >
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                          </button>
-                          {/* Move button */}
-                          <button
-                            onClick={() => openMoveModal(file)}
-                            class="p-2 text-gray-400 hover:text-blue-400 rounded-lg hover:bg-gray-700"
-                            title="Move"
-                          >
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-                            </svg>
-                          </button>
-                          {/* Share button - works for both files and folders */}
-                          <button
-                            onClick={() => setShareFile(file)}
-                            class="p-2 text-gray-400 hover:text-green-400 rounded-lg hover:bg-gray-700"
-                            title="Share"
-                          >
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                            </svg>
-                          </button>
-                          {/* Copy UID Link button - only for files with UID */}
-                          {!file.isFolder && file.uid && (
-                            <button
-                              onClick={() => copyUIDLink(file)}
-                              class="p-2 text-gray-400 hover:text-cyan-400 rounded-lg hover:bg-gray-700"
-                              title="Copy Direct Link"
-                            >
-                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                              </svg>
-                            </button>
-                          )}
-                          {!file.isFolder && (
-                            <button
-                              onClick={() => handleDownload(file)}
-                              class="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-700"
-                              title="Download"
-                            >
-                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                              </svg>
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleDelete(file)}
-                            class="p-2 text-gray-400 hover:text-red-400 rounded-lg hover:bg-gray-700"
-                            title="Delete"
-                          >
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
                             </svg>
                           </button>
                         </div>
@@ -1056,9 +1009,96 @@ export default function Dashboard(props: DashboardProps) {
                 </For>
               </tbody>
             </table>
+            </div>
           </div>
         </Show>
       </div>
+
+      {/* Fixed Position Action Menu (Portal-like) */}
+      <Show when={openMenuId() && menuPosition()}>
+        {(() => {
+          const file = files().find(f => f.id === openMenuId());
+          if (!file) return null;
+          const pos = menuPosition()!;
+          return (
+            <div 
+              class="fixed w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 action-menu-container"
+              style={{ top: `${pos.top}px`, left: `${pos.left}px` }}
+            >
+              {!file.isFolder && isPreviewable(file.filename) && (
+                <button
+                  onClick={() => { handleOpen(file); setOpenMenuId(null); setMenuPosition(null); }}
+                  class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2 rounded-t-lg"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                  Open/Preview
+                </button>
+              )}
+              <button
+                onClick={() => { openRenameModal(file); setOpenMenuId(null); setMenuPosition(null); }}
+                class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                Rename
+              </button>
+              <button
+                onClick={() => { openMoveModal(file); setOpenMenuId(null); setMenuPosition(null); }}
+                class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+                </svg>
+                Move
+              </button>
+              <button
+                onClick={() => { setShareFile(file); setOpenMenuId(null); setMenuPosition(null); }}
+                class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                </svg>
+                Share
+              </button>
+              {!file.isFolder && file.uid && (
+                <button
+                  onClick={() => { copyUIDLink(file); setOpenMenuId(null); setMenuPosition(null); }}
+                  class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                  Copy Direct Link
+                </button>
+              )}
+              {!file.isFolder && (
+                <button
+                  onClick={() => { handleDownload(file); setOpenMenuId(null); setMenuPosition(null); }}
+                  class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Download
+                </button>
+              )}
+              <button
+                onClick={() => { handleDelete(file); setOpenMenuId(null); setMenuPosition(null); }}
+                class="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-gray-700 flex items-center gap-2 rounded-b-lg"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Delete
+              </button>
+            </div>
+          );
+        })()}
+      </Show>
 
       {/* Preview Modal */}
       <Show when={previewFile()}>

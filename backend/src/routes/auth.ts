@@ -8,6 +8,12 @@ import { z } from 'zod';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { logAudit } from './admin.js';
 import { setVirusTotalApiKey } from '../lib/virustotal.js';
+import { checkTrustedDevice, addTrustedDevice, updateTrustedDeviceLastUsed } from './trustedDevices.js';
+
+// Configure TOTP with a wider time window (allow 1 step before/after for clock drift)
+authenticator.options = {
+  window: 1, // Allow codes from 30 seconds before/after current time
+};
 
 // Temporary challenge storage (in production, use Redis)
 const pendingChallenges = new Map<string, { challenge: string; expires: number }>();
@@ -21,12 +27,18 @@ const registerSchema = z.object({
 
 const loginChallengeSchema = z.object({
   username: z.string(),
+  deviceFingerprint: z.string().optional(),
 });
 
 const loginVerifySchema = z.object({
   username: z.string(),
   signature: z.string(),
   totp: z.string().optional(),
+  trustDevice: z.boolean().optional(),
+  deviceFingerprint: z.string().optional(),
+  deviceName: z.string().optional(),
+  browser: z.string().optional(),
+  os: z.string().optional(),
 });
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
@@ -139,7 +151,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ ok: false, msg: 'Invalid request' });
     }
     
-    const { username } = body.data;
+    const { username, deviceFingerprint } = body.data;
     
     const user = await db.query.users.findFirst({
       where: eq(schema.users.username, username),
@@ -151,6 +163,12 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     
     if (user.isSuspended) {
       return reply.status(403).send({ ok: false, msg: 'Account is suspended' });
+    }
+    
+    // Check if device is trusted (skip 2FA requirement)
+    let isTrustedDevice = false;
+    if (deviceFingerprint && user.totpEnabled) {
+      isTrustedDevice = await checkTrustedDevice(user.id, deviceFingerprint);
     }
     
     // Generate challenge
@@ -171,7 +189,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       ok: true,
       challenge,
       challengeId,
-      requires2FA: user.totpEnabled,
+      requires2FA: user.totpEnabled && !isTrustedDevice, // Skip 2FA for trusted devices
     };
   });
   
@@ -182,7 +200,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ ok: false, msg: 'Invalid request' });
     }
     
-    const { username, signature, totp } = body.data;
+    const { username, signature, totp, trustDevice, deviceFingerprint, deviceName, browser, os } = body.data;
     const challengeId = (request.body as any).challengeId;
     
     // Verify challenge exists
@@ -204,8 +222,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     // TODO: Verify ECDSA signature using user.publicKeyPem
     // For now, we'll trust the signature (implement WebCrypto verification)
     
-    // Verify 2FA if enabled
-    if (user.totpEnabled) {
+    // Check if device is trusted (skip 2FA if trusted)
+    let isTrustedDevice = false;
+    if (deviceFingerprint) {
+      isTrustedDevice = await checkTrustedDevice(user.id, deviceFingerprint);
+      if (isTrustedDevice) {
+        await updateTrustedDeviceLastUsed(user.id, deviceFingerprint);
+      }
+    }
+    
+    // Verify 2FA if enabled and device not trusted
+    if (user.totpEnabled && !isTrustedDevice) {
       if (!totp) {
         return reply.status(400).send({ ok: false, msg: '2FA code required' });
       }
@@ -228,9 +255,22 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       }
     }
     
-    // Create session
+    // Add device as trusted if requested and 2FA was verified
+    if (trustDevice && deviceFingerprint && deviceName && user.totpEnabled && totp) {
+      await addTrustedDevice(
+        user.id,
+        deviceFingerprint,
+        deviceName,
+        browser || null,
+        os || null,
+        request.ip
+      );
+    }
+    
+    // Create session with longer expiry for trusted devices
     const token = generateToken();
-    const expiresAt = getExpiryDate(24); // 24 hours
+    const expiryHours = isTrustedDevice ? 720 : 24; // 30 days for trusted, 24 hours for untrusted
+    const expiresAt = getExpiryDate(expiryHours);
     
     await db.insert(schema.sessions).values({
       token,

@@ -103,6 +103,19 @@ export const notifications = sqliteTable('notifications', {
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 
+// ============ TRUSTED DEVICES ============
+export const trustedDevices = sqliteTable('trusted_devices', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  deviceFingerprint: text('device_fingerprint').notNull(), // Unique device identifier
+  deviceName: text('device_name').notNull(), // e.g., "Chrome on Windows"
+  browser: text('browser'),
+  os: text('os'),
+  ipAddress: text('ip_address'),
+  lastUsed: integer('last_used', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
 // ============ RELATIONS ============
 export const usersRelations = relations(users, ({ many }) => ({
   sessions: many(sessions),
@@ -110,6 +123,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   sharedFiles: many(fileShares),
   auditLogs: many(auditLogs),
   notifications: many(notifications),
+  trustedDevices: many(trustedDevices),
 }));
 
 export const sessionsRelations = relations(sessions, ({ one }) => ({
@@ -139,6 +153,10 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
 
 export const notificationsRelations = relations(notifications, ({ one }) => ({
   user: one(users, { fields: [notifications.userId], references: [users.id] }),
+}));
+
+export const trustedDevicesRelations = relations(trustedDevices, ({ one }) => ({
+  user: one(users, { fields: [trustedDevices.userId], references: [users.id] }),
 }));
 
 // ============ TYPE EXPORTS ============
