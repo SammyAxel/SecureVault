@@ -210,6 +210,69 @@ export function WordPreview(props: { url: string }) {
   );
 }
 
+// ============ Text Preview ============
+export function TextPreview(props: { url: string; filename: string }) {
+  const [content, setContent] = createSignal<string>('');
+  const [error, setError] = createSignal<string | null>(null);
+  const [loading, setLoading] = createSignal(true);
+
+  createEffect(async () => {
+    try {
+      setLoading(true);
+      const response = await fetch(props.url);
+      const text = await response.text();
+      setContent(text);
+    } catch (err) {
+      setError('Failed to load file');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  // Determine if content is JSON for pretty printing
+  const isJson = () => {
+    const ext = props.filename.split('.').pop()?.toLowerCase();
+    return ext === 'json';
+  };
+
+  const displayContent = () => {
+    if (isJson()) {
+      try {
+        const parsed = JSON.parse(content());
+        return JSON.stringify(parsed, null, 2);
+      } catch {
+        return content();
+      }
+    }
+    return content();
+  };
+
+  return (
+    <div class="overflow-auto max-h-[80vh] bg-gray-100 py-8">
+      <Show when={loading()}>
+        <div class="flex items-center justify-center p-8">
+          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
+        </div>
+      </Show>
+      
+      <Show when={error()}>
+        <div class="bg-white max-w-5xl w-full mx-auto shadow-xl rounded-sm p-12">
+          <div class="text-red-600">{error()}</div>
+        </div>
+      </Show>
+      
+      <Show when={!loading() && !error()}>
+        <div class="bg-white max-w-5xl w-full mx-auto shadow-xl rounded-sm p-12">
+          <pre class="whitespace-pre-wrap break-words font-mono text-sm text-gray-900 leading-relaxed">
+            <code>{displayContent()}</code>
+          </pre>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
 // ============ CSV Parser Helper ============
 function parseCSV(text: string): string[][] {
   const rows: string[][] = [];
