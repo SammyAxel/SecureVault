@@ -4,6 +4,24 @@
 
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  /* Mobile: safe area for notched devices */
+  padding-left: env(safe-area-inset-left, 0);
+  padding-right: env(safe-area-inset-right, 0);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  overflow-x: hidden;
+}
+
+/* Improve tap targets on touch devices (optional; use min-h-11 / py-3 on key buttons) */
+@media (hover: none) and (pointer: coarse) {
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Smooth horizontal scroll on iOS */
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Custom scrollbar */
@@ -71,4 +89,35 @@ input[type="checkbox"] {
 
 .animate-slide-in {
   animation: slide-in 0.3s ease-out;
+}
+
+/* Profile dropdown */
+@keyframes dropdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-dropdown-in {
+  animation: dropdown-in 0.2s ease-out;
+}
+
+@keyframes dropdown-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+.animate-dropdown-out {
+  animation: dropdown-out 0.2s ease-out forwards;
 }

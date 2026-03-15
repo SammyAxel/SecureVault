@@ -47,7 +47,8 @@ export const AuthProvider: ParentComponent = (props) => {
       inactivityTimer = setTimeout(() => {
         console.log('Auto-logout due to inactivity');
         logout();
-        toast.info('You have been logged out due to inactivity.');
+        // Persistent toast (duration 0 = stays until user dismisses)
+        toast.info('You have been logged out due to inactivity. Please sign in again.', 0);
       }, INACTIVITY_TIMEOUT);
     }
   };

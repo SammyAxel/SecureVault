@@ -21,8 +21,8 @@ export default function ConfirmModal() {
   return (
     <Show when={confirmState()}>
       {(state) => (
-        <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-[90]">
-          <div class="bg-gray-800 rounded-xl p-6 max-w-md w-full mx-4 border border-gray-700 shadow-xl">
+        <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-[90] p-4 sm:p-0">
+          <div class="bg-gray-800 rounded-xl p-4 sm:p-6 max-w-md w-full mx-0 sm:mx-4 border border-gray-700 shadow-xl max-h-[90vh] overflow-y-auto">
             {/* Header */}
             <div class="flex items-center gap-3 mb-4">
               <div class={`w-10 h-10 rounded-full flex items-center justify-center ${

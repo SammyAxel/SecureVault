@@ -71,7 +71,7 @@ function ToastItem(props: { toast: typeof toasts extends () => infer T ? T exten
 
 export default function ToastContainer() {
   return (
-    <div class="fixed top-4 right-4 z-[100] flex flex-col gap-2 max-w-sm">
+    <div class="fixed top-4 left-3 right-3 sm:left-auto sm:right-4 sm:max-w-sm z-[100] flex flex-col gap-2 pt-[env(safe-area-inset-top)]">
       <For each={toasts()}>
         {(t) => <ToastItem toast={t} />}
       </For>

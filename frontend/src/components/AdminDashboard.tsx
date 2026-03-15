@@ -45,6 +45,12 @@ export default function AdminDashboard(props: AdminDashboardProps) {
   const [newVirusTotalLabel, setNewVirusTotalLabel] = createSignal('');
   const [settingsSaving, setSettingsSaving] = createSignal(false);
 
+  // Admin settings (Malware Bazaar)
+  const [malwareBazaarConfigured, setMalwareBazaarConfigured] = createSignal(false);
+  const [malwareBazaarMaskedKey, setMalwareBazaarMaskedKey] = createSignal<string | null>(null);
+  const [newMalwareBazaarKey, setNewMalwareBazaarKey] = createSignal('');
+  const [malwareBazaarSaving, setMalwareBazaarSaving] = createSignal(false);
+
   // Load stats
   const loadStats = async () => {
     try {
@@ -70,13 +76,18 @@ export default function AdminDashboard(props: AdminDashboardProps) {
     }
   };
 
-  // Load admin settings (VirusTotal keys + usage)
+  // Load admin settings (VirusTotal + Malware Bazaar)
   const loadAdminSettings = async () => {
     try {
-      const result = await api.getVirusTotalKeys();
-      setVirusTotalKeys(result.keys);
-      setVirusTotalUsage(result.usage);
-      setVirusTotalConfigured(result.keys.some((k) => k.enabled));
+      const [vtResult, mbResult] = await Promise.all([
+        api.getVirusTotalKeys(),
+        api.getMalwareBazaarConfig(),
+      ]);
+      setVirusTotalKeys(vtResult.keys);
+      setVirusTotalUsage(vtResult.usage);
+      setVirusTotalConfigured(vtResult.keys.some((k) => k.enabled));
+      setMalwareBazaarConfigured(mbResult.configured);
+      setMalwareBazaarMaskedKey(mbResult.maskedKey);
     } catch (error) {
       console.error('Failed to load admin settings:', error);
     }
@@ -112,6 +123,41 @@ export default function AdminDashboard(props: AdminDashboardProps) {
       toast.error(`Failed to update key: ${error.message}`);
     } finally {
       setSettingsSaving(false);
+    }
+  };
+
+  const handleSetMalwareBazaarKey = async () => {
+    if (!newMalwareBazaarKey().trim()) return;
+    setMalwareBazaarSaving(true);
+    try {
+      const result = await api.setMalwareBazaarKey(newMalwareBazaarKey().trim());
+      setMalwareBazaarConfigured(result.configured);
+      setMalwareBazaarMaskedKey(result.maskedKey);
+      setNewMalwareBazaarKey('');
+      toast.success('Malware Bazaar API key saved');
+    } catch (error: any) {
+      toast.error(`Failed to save key: ${error.message}`);
+    } finally {
+      setMalwareBazaarSaving(false);
+    }
+  };
+
+  const handleRemoveMalwareBazaarKey = async () => {
+    const confirmed = await openConfirm({
+      title: 'Remove Malware Bazaar API Key',
+      message: 'Are you sure you want to remove the Malware Bazaar API key? Uploads will no longer be checked against Malware Bazaar.',
+    });
+    if (!confirmed) return;
+    setMalwareBazaarSaving(true);
+    try {
+      const result = await api.removeMalwareBazaarKey();
+      setMalwareBazaarConfigured(result.configured);
+      setMalwareBazaarMaskedKey(result.maskedKey);
+      toast.success('Malware Bazaar API key removed');
+    } catch (error: any) {
+      toast.error(`Failed to remove key: ${error.message}`);
+    } finally {
+      setMalwareBazaarSaving(false);
     }
   };
 
@@ -363,7 +409,7 @@ export default function AdminDashboard(props: AdminDashboardProps) {
             </div>
           </div>
 
-          {/* Total Storage */}
+          {/* Total Storage Used (by users) */}
           <div class="bg-gray-800 rounded-xl p-6">
             <div class="flex items-center gap-4">
               <div class="w-12 h-12 bg-purple-500/20 rounded-lg flex items-center justify-center">
@@ -374,9 +420,28 @@ export default function AdminDashboard(props: AdminDashboardProps) {
               <div>
                 <p class="text-gray-400 text-sm">Total Storage Used</p>
                 <p class="text-2xl font-bold text-white">{formatSize(stats()?.totalStorage || 0)}</p>
+                <p class="text-gray-500 text-xs mt-0.5">by all users</p>
               </div>
             </div>
           </div>
+
+          {/* Filesystem: sisa storage */}
+          <Show when={stats()?.storageBackend}>
+            <div class="bg-gray-800 rounded-xl p-6">
+              <div class="flex items-center gap-4">
+                <div class="w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center">
+                  <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                  </svg>
+                </div>
+                <div>
+                  <p class="text-gray-400 text-sm">Filesystem (storage backend)</p>
+                  <p class="text-2xl font-bold text-white">{formatSize(stats()!.storageBackend!.free)} free</p>
+                  <p class="text-gray-500 text-xs mt-0.5">of {formatSize(stats()!.storageBackend!.total)} total</p>
+                </div>
+              </div>
+            </div>
+          </Show>
 
           {/* Total Files */}
           <div class="bg-gray-800 rounded-xl p-6">
@@ -689,9 +754,10 @@ export default function AdminDashboard(props: AdminDashboardProps) {
 
       {/* Settings Tab */}
       <Show when={activeTab() === 'settings'}>
-        <div class="space-y-6 max-w-2xl">
+        <div class="space-y-8 max-w-2xl">
+          {/* Section 1: VirusTotal API Management */}
           <div class="bg-gray-800 rounded-xl p-6">
-            <h3 class="text-lg font-semibold text-white mb-2">VirusTotal Malware Scan</h3>
+            <h3 class="text-lg font-semibold text-white mb-2">1. VirusTotal</h3>
             <p class="text-gray-400 text-sm mb-4">
               When configured, uploaded files are scanned with VirusTotal before being stored. Infected files are blocked.
             </p>
@@ -795,6 +861,55 @@ export default function AdminDashboard(props: AdminDashboardProps) {
 
             <p class="text-gray-500 text-xs mt-4">
               Get a free API key at <a href="https://www.virustotal.com/gui/my-apikey" target="_blank" rel="noopener noreferrer" class="text-primary-400 hover:underline">virustotal.com</a>. Daily limit is 500 requests per key.
+            </p>
+          </div>
+
+          {/* Section 2: Malware Bazaar API Management */}
+          <div class="bg-gray-800 rounded-xl p-6">
+            <h3 class="text-lg font-semibold text-white mb-2">2. Malware Bazaar</h3>
+            <p class="text-gray-400 text-sm mb-4">
+              When configured, uploaded files are checked against abuse.ch Malware Bazaar (hash lookup). Files known as malware are blocked.
+            </p>
+            <div class="flex items-center gap-3 mb-4">
+              <span class={`px-3 py-1 rounded-full text-sm ${
+                malwareBazaarConfigured() ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-400'
+              }`}>
+                {malwareBazaarConfigured() ? 'Configured' : 'Not set'}
+              </span>
+              <Show when={malwareBazaarConfigured() && malwareBazaarMaskedKey()}>
+                <span class="text-xs text-gray-400 font-mono">{malwareBazaarMaskedKey()}</span>
+              </Show>
+            </div>
+
+            <div class="flex flex-col sm:flex-row gap-3 mb-4">
+              <input
+                type="password"
+                value={newMalwareBazaarKey()}
+                onInput={(e) => setNewMalwareBazaarKey(e.currentTarget.value)}
+                class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500 font-mono text-sm"
+                placeholder="Paste Malware Bazaar Auth-Key"
+                autocomplete="off"
+              />
+              <button
+                onClick={handleSetMalwareBazaarKey}
+                disabled={malwareBazaarSaving() || !newMalwareBazaarKey().trim()}
+                class="px-4 py-2 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 text-white rounded-lg text-sm transition-colors whitespace-nowrap"
+              >
+                {malwareBazaarSaving() ? 'Saving...' : 'Save API Key'}
+              </button>
+            </div>
+            <Show when={malwareBazaarConfigured()}>
+              <button
+                onClick={handleRemoveMalwareBazaarKey}
+                disabled={malwareBazaarSaving()}
+                class="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white rounded text-sm"
+              >
+                Remove API Key
+              </button>
+            </Show>
+
+            <p class="text-gray-500 text-xs mt-4">
+              Get a free Auth-Key at <a href="https://auth.abuse.ch/" target="_blank" rel="noopener noreferrer" class="text-primary-400 hover:underline">auth.abuse.ch</a>. Used for hash lookup only (no file upload to Malware Bazaar).
             </p>
           </div>
         </div>

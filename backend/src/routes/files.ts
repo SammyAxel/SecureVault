@@ -2,12 +2,13 @@ import { FastifyInstance } from 'fastify';
 import { db, schema } from '../db/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
-import { saveFile, getFile, deleteFile, getFullPath } from '../lib/storage.js';
+import { saveFile, getFile, deleteFile, getStream, getStats } from '../lib/storage.js';
 import { scanFile as virusTotalScan } from '../lib/virustotal.js';
+import { scanFile as malwareBazaarScan } from '../lib/malwarebazaar.js';
 import { generateUUID, generateUID } from '../lib/crypto.js';
 import { z } from 'zod';
-import { createReadStream } from 'fs';
 import { logAudit } from './admin.js';
+import { getClientIp } from '../lib/clientIp.js';
 
 const createFolderSchema = z.object({
   name: z.string().min(1).max(255),
@@ -135,7 +136,16 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         quotaExceeded: true,
       });
     }
-    
+
+    // Check filesystem free space (total storage follows backend disk/mount)
+    const backendStats = await getStats();
+    if (backendStats && backendStats.free < fileSize) {
+      return reply.status(507).send({
+        ok: false,
+        msg: 'Storage backend is full. Not enough disk space.',
+      });
+    }
+
     // Get metadata from fields
     const fields = data.fields as any;
     const encryptedKey = fields.encrypted_key?.value;
@@ -147,35 +157,45 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ ok: false, msg: 'Missing encryption metadata' });
     }
 
-    // Malware scan (VirusTotal) if configured
-    // Use file hash from frontend (calculated from original file) if provided, otherwise fallback to encrypted file
-    const scanResult = await virusTotalScan(buffer, data.filename, fileHash);
-    if (!scanResult.safe) {
-      // Log blocked upload due to malware
+    // Malware scan: VirusTotal and/or Malware Bazaar (when configured)
+    const vtResult = await virusTotalScan(buffer, data.filename, fileHash);
+    const mbResult = await malwareBazaarScan(buffer, data.filename, fileHash);
+
+    if (!vtResult.safe || !mbResult.safe) {
+      const msg = !vtResult.safe
+        ? (vtResult.error ?? `File flagged as malicious (${vtResult.malicious ?? 0} engines). Upload blocked.`)
+        : (mbResult.error ?? (mbResult.signature ? `File is known malware (${mbResult.signature}). Upload blocked.` : 'File flagged by Malware Bazaar. Upload blocked.'));
+
       await logAudit(
         user.id,
         user.username,
         'UPLOAD_BLOCKED',
         'FILE',
         undefined,
-        { 
-          filename: data.filename, 
+        {
+          filename: data.filename,
           fileSize,
-          virusTotalScan: {
+          virusTotalScan: !vtResult.safe ? {
             result: 'MALICIOUS',
-            maliciousCount: scanResult.malicious ?? 0,
-            suspiciousCount: scanResult.suspicious ?? 0,
-            hashFound: scanResult.hashFound ?? false,
-            error: scanResult.error ?? null,
-          }
+            maliciousCount: vtResult.malicious ?? 0,
+            suspiciousCount: vtResult.suspicious ?? 0,
+            hashFound: vtResult.hashFound ?? false,
+            error: vtResult.error ?? null,
+          } : undefined,
+          malwareBazaarScan: !mbResult.safe ? {
+            result: 'MALICIOUS',
+            hashFound: mbResult.hashFound,
+            signature: mbResult.signature,
+            error: mbResult.error ?? null,
+          } : undefined,
         },
-        request.ip,
+        getClientIp(request),
         request.headers['user-agent']
       );
-      
+
       return reply.status(400).send({
         ok: false,
-        msg: scanResult.error ?? `File flagged as malicious (${scanResult.malicious ?? 0} engines). Upload blocked.`,
+        msg,
         malwareDetected: true,
       });
     }
@@ -203,26 +223,31 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       .set({ storageUsed: user.storageUsed! + fileSize })
       .where(eq(schema.users.id, user.id));
     
-    // Log audit with VirusTotal scan details
+    // Log audit with scan details (VirusTotal + Malware Bazaar)
     await logAudit(
       user.id,
       user.username,
       'UPLOAD',
       'FILE',
       fileId,
-      { 
-        filename: data.filename, 
-        fileSize, 
+      {
+        filename: data.filename,
+        fileSize,
         uid: fileUid,
         virusTotalScan: {
-          result: scanResult.hashFound === false ? 'UNKNOWN' : 'CLEAN',
-          maliciousCount: scanResult.malicious ?? 0,
-          suspiciousCount: scanResult.suspicious ?? 0,
-          hashFound: scanResult.hashFound ?? false,
-          error: scanResult.error ?? null,
-        }
+          result: vtResult.hashFound === false ? 'UNKNOWN' : 'CLEAN',
+          maliciousCount: vtResult.malicious ?? 0,
+          suspiciousCount: vtResult.suspicious ?? 0,
+          hashFound: vtResult.hashFound ?? false,
+          error: vtResult.error ?? null,
+        },
+        malwareBazaarScan: {
+          result: mbResult.hashFound === false ? 'UNKNOWN' : 'CLEAN',
+          hashFound: mbResult.hashFound ?? false,
+          error: mbResult.error ?? null,
+        },
       },
-      request.ip,
+      getClientIp(request),
       request.headers['user-agent']
     );
     
@@ -296,8 +321,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     }
     
     // Stream file
-    const fullPath = getFullPath(file.storagePath);
-    const stream = createReadStream(fullPath);
+    const stream = getStream(file.storagePath);
     
     reply.header('Content-Type', 'application/octet-stream');
     reply.header('Content-Disposition', `attachment; filename="${file.filename}"`);
@@ -383,7 +407,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       file.isFolder ? 'FOLDER' : 'FILE',
       fileId,
       { filename: file.filename, fileSize: totalSizeToReclaim },
-      request.ip,
+      getClientIp(request),
       request.headers['user-agent']
     );
     

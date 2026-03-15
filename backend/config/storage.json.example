@@ -1,0 +1,6 @@
+{
+  "driver": "local",
+  "local": {
+    "path": "./uploads"
+  }
+}

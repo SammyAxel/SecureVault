@@ -8,6 +8,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { readFile } from 'fs/promises';
 
+import { getClientIp } from './lib/clientIp.js';
 import { authRoutes } from './routes/auth.js';
 import { fileRoutes } from './routes/files.js';
 import { shareRoutes } from './routes/share.js';
@@ -63,11 +64,11 @@ await app.register(helmet, {
   hsts: false, // Disable HSTS for HTTP deployments
 });
 
-// Rate limiting
+// Rate limiting (use client IP from proxy headers when behind reverse proxy)
 await app.register(rateLimit, {
   max: 100,
   timeWindow: '1 minute',
-  keyGenerator: (request) => request.ip,
+  keyGenerator: (request) => getClientIp(request),
 });
 
 // Multipart (file uploads) — optimize for large files through proxies

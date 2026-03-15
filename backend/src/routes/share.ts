@@ -3,11 +3,11 @@ import { db, schema } from '../db/index.js';
 import { eq, and, gt } from 'drizzle-orm';
 import { authenticate, optionalAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { generateUUID, getExpiryDate } from '../lib/crypto.js';
-import { getFile, getFullPath } from '../lib/storage.js';
+import { getFile, getStream } from '../lib/storage.js';
 import { createNotification } from './notifications.js';
 import { z } from 'zod';
-import { createReadStream } from 'fs';
 import { logAudit } from './admin.js';
+import { getClientIp } from '../lib/clientIp.js';
 
 const shareWithUserSchema = z.object({
   fileId: z.string().uuid(),
@@ -90,7 +90,7 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       'FILE',
       fileId,
       { filename: file.filename, recipientUsername },
-      request.ip,
+      getClientIp(request),
       request.headers['user-agent']
     );
     
@@ -240,7 +240,7 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       file.isFolder ? 'FOLDER' : 'FILE',
       fileId,
       { filename: file.filename, expiresInHours, maxAccess, isFolder: file.isFolder },
-      request.ip,
+      getClientIp(request),
       request.headers['user-agent']
     );
     
@@ -401,17 +401,14 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(403).send({ ok: false, msg: 'File not in shared folder' });
     }
     
-    const fullPath = getFullPath(file.storagePath);
-    const stream = createReadStream(fullPath);
-    
+    const stream = getStream(file.storagePath);
     reply.header('Content-Type', 'application/octet-stream');
     reply.header('Content-Disposition', `attachment; filename="${file.filename}"`);
     reply.header('X-Encrypted-Key', file.encryptedKey);
     reply.header('X-IV', file.iv);
-    
     return reply.send(stream);
   });
-  
+
   // ============ DOWNLOAD PUBLIC SHARE ============
   app.get('/api/public/:token/download', async (request, reply) => {
     const { token } = request.params as { token: string };
@@ -432,9 +429,7 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
     }
     
-    const fullPath = getFullPath(share.file.storagePath);
-    const stream = createReadStream(fullPath);
-    
+    const stream = getStream(share.file.storagePath);
     reply.header('Content-Type', 'application/octet-stream');
     reply.header('Content-Disposition', `attachment; filename="${share.file.filename}"`);
     reply.header('X-Encrypted-Key', share.file.encryptedKey);

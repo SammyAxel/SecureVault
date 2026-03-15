@@ -4,10 +4,8 @@ import * as api from '../lib/api';
 import { toast } from '../stores/toast';
 import { openConfirm } from '../stores/confirm';
 import {
-  generateEncryptedKeyBundle,
+  generateKeyBundle,
   downloadKeyBundle,
-  getCurrentKeys,
-  isEncryptedKeyBundle,
 } from '../lib/crypto';
 
 interface ProfileProps {
@@ -22,22 +20,23 @@ export default function Profile(props: ProfileProps) {
   const [activeTab, setActiveTab] = createSignal<ProfileTab>('general');
 
   return (
-    <div class="max-w-4xl mx-auto">
+    <div class="max-w-4xl mx-auto px-0 sm:px-0">
       {/* Header */}
-      <div class="flex items-center gap-4 mb-6">
+      <div class="flex items-center gap-2 sm:gap-4 mb-4 sm:mb-6 min-w-0">
         <button
           onClick={props.onBack}
-          class="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+          class="p-2 hover:bg-gray-700 rounded-lg transition-colors touch-target sm:min-h-0 shrink-0"
+          title="Back"
         >
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
         </button>
-        <h1 class="text-2xl font-bold">Profile Settings</h1>
+        <h1 class="text-xl sm:text-2xl font-bold truncate">Profile Settings</h1>
       </div>
 
-      {/* Tabs */}
-      <div class="flex gap-2 mb-6 border-b border-gray-700">
+      {/* Tabs: scroll horizontally on mobile */}
+      <div class="flex gap-2 mb-6 border-b border-gray-700 overflow-x-auto overflow-y-hidden flex-nowrap min-w-0 -mx-px">
         <TabButton 
           active={activeTab() === 'general'} 
           onClick={() => setActiveTab('general')}
@@ -326,10 +325,6 @@ function SecurityTab() {
   const [backupCodes, setBackupCodes] = createSignal<string[]>([]);
   const [isLoading, setIsLoading] = createSignal(false);
   const [disableCode, setDisableCode] = createSignal('');
-  
-  // Password reset state
-  const [newPassword, setNewPassword] = createSignal('');
-  const [confirmPassword, setConfirmPassword] = createSignal('');
   const [isGeneratingKeys, setIsGeneratingKeys] = createSignal(false);
 
   const setup2FA = async () => {
@@ -386,16 +381,6 @@ function SecurityTab() {
   };
 
   const regenerateKeys = async () => {
-    if (newPassword().length < 8) {
-      toast.error('Password must be at least 8 characters');
-      return;
-    }
-    
-    if (newPassword() !== confirmPassword()) {
-      toast.error('Passwords do not match');
-      return;
-    }
-
     openConfirm({
       title: 'Regenerate Encryption Keys?',
       message: 'This will generate new encryption keys. Your old key file will no longer work, and you will NOT be able to decrypt files encrypted with your old keys. Are you absolutely sure?',
@@ -404,11 +389,9 @@ function SecurityTab() {
       onConfirm: async () => {
         setIsGeneratingKeys(true);
         try {
-          const { bundle } = await generateEncryptedKeyBundle(newPassword());
-          downloadKeyBundle(bundle, user()!.username);
+          const keys = await generateKeyBundle();
+          downloadKeyBundle(keys, user()!.username);
           toast.success('New keys generated! Please save your new key file.');
-          setNewPassword('');
-          setConfirmPassword('');
         } catch (err: any) {
           toast.error(err.message || 'Failed to generate keys');
         } finally {
@@ -567,7 +550,7 @@ function SecurityTab() {
       <div class="bg-gray-800 rounded-xl p-6">
         <h3 class="text-lg font-semibold mb-2">Encryption Keys</h3>
         <p class="text-gray-400 text-sm mb-4">
-          Generate new password-protected encryption keys. Use this if you forgot your password or want to change it.
+          Generate new encryption keys. Use this if you've lost your key file.
         </p>
         
         <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-4">
@@ -576,36 +559,13 @@ function SecurityTab() {
           </p>
         </div>
 
-        <div class="space-y-4 max-w-md">
-          <div>
-            <label class="block text-gray-400 text-sm mb-2">New Master Password</label>
-            <input
-              type="password"
-              value={newPassword()}
-              onInput={(e) => setNewPassword(e.currentTarget.value)}
-              class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500"
-              placeholder="Enter new password"
-              minLength={8}
-            />
-          </div>
-          <div>
-            <label class="block text-gray-400 text-sm mb-2">Confirm Password</label>
-            <input
-              type="password"
-              value={confirmPassword()}
-              onInput={(e) => setConfirmPassword(e.currentTarget.value)}
-              class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500"
-              placeholder="Confirm new password"
-            />
-          </div>
-          <button
-            onClick={regenerateKeys}
-            disabled={isGeneratingKeys() || newPassword().length < 8 || newPassword() !== confirmPassword()}
-            class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 text-white rounded-lg transition-colors"
-          >
-            {isGeneratingKeys() ? 'Generating...' : 'Generate New Keys'}
-          </button>
-        </div>
+        <button
+          onClick={regenerateKeys}
+          disabled={isGeneratingKeys()}
+          class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 text-white rounded-lg transition-colors"
+        >
+          {isGeneratingKeys() ? 'Generating...' : 'Generate New Keys'}
+        </button>
       </div>
     </div>
   );

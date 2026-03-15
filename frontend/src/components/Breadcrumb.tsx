@@ -13,7 +13,7 @@ interface BreadcrumbProps {
 
 export default function Breadcrumb(props: BreadcrumbProps) {
   return (
-    <nav class="flex items-center gap-2 text-sm">
+    <nav class="flex items-center gap-2 text-sm overflow-x-auto overflow-y-hidden flex-nowrap min-w-0" aria-label="Breadcrumb">
       <For each={props.items}>
         {(item, index) => (
           <>

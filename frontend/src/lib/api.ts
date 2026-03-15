@@ -433,6 +433,8 @@ export interface AdminStats {
   activeSessions: number;
   totalFiles: number;
   suspendedUsers: number;
+  /** Filesystem capacity (total/free in bytes). null if backend does not expose it. */
+  storageBackend: { total: number; free: number } | null;
 }
 
 export interface AdminUser {
@@ -547,6 +549,24 @@ export async function updateVirusTotalKey(id: string, updates: { enabled?: boole
 
 export async function removeVirusTotalKey(id: string) {
   return request<{ ok: boolean; keys: VirusTotalKey[]; usage: VirusTotalUsage }>(`/admin/virustotal-keys/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+// Malware Bazaar (abuse.ch)
+export async function getMalwareBazaarConfig() {
+  return request<{ ok: boolean; configured: boolean; maskedKey: string | null }>('/admin/malwarebazaar');
+}
+
+export async function setMalwareBazaarKey(apiKey: string) {
+  return request<{ ok: boolean; configured: boolean; maskedKey: string | null }>('/admin/malwarebazaar', {
+    method: 'POST',
+    body: JSON.stringify({ apiKey }),
+  });
+}
+
+export async function removeMalwareBazaarKey() {
+  return request<{ ok: boolean; configured: boolean; maskedKey: string | null }>('/admin/malwarebazaar', {
     method: 'DELETE',
   });
 }

@@ -131,7 +131,7 @@ export default function NotificationCenter() {
 
       {/* Dropdown Panel */}
       <Show when={isOpen()}>
-        <div class="absolute right-0 mt-2 w-96 bg-gray-800 rounded-lg shadow-xl border border-gray-700 z-50 max-h-[600px] flex flex-col">
+        <div class="absolute right-0 mt-2 w-96 max-w-[calc(100vw-1.5rem)] bg-gray-800 rounded-lg shadow-xl border border-gray-700 z-50 max-h-[70vh] sm:max-h-[600px] flex flex-col">
           {/* Header */}
           <div class="flex items-center justify-between p-4 border-b border-gray-700">
             <h3 class="text-lg font-semibold text-white">Notifications</h3>

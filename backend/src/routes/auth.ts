@@ -8,7 +8,12 @@ import { z } from 'zod';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { logAudit } from './admin.js';
 import { setVirusTotalApiKey } from '../lib/virustotal.js';
+import { getStats } from '../lib/storage.js';
 import { checkTrustedDevice, addTrustedDevice, updateTrustedDeviceLastUsed } from './trustedDevices.js';
+import { getClientIp } from '../lib/clientIp.js';
+
+const DEFAULT_QUOTA_BYTES = 524288000; // 500MB (same as schema default)
+const ADMIN_QUOTA_BYTES = 5 * 1024 * 1024 * 1024; // 5GB
 
 // Configure TOTP with a wider time window (allow 1 step before/after for clock drift)
 authenticator.options = {
@@ -86,14 +91,21 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     if (existing) {
       return reply.status(409).send({ ok: false, msg: 'Username already exists' });
     }
-    
+
+    // Cap admin quota by filesystem free (total storage follows disk)
+    let adminQuota = ADMIN_QUOTA_BYTES;
+    const backendStats = await getStats();
+    if (backendStats && backendStats.free < adminQuota) {
+      adminQuota = Math.max(0, backendStats.free);
+    }
+
     // Create admin user
     const [user] = await db.insert(schema.users).values({
       username,
       publicKeyPem: publicKey,
       encryptionPublicKeyPem: encryptionPublicKey,
       isAdmin: true, // First user is admin!
-      storageQuota: 5 * 1024 * 1024 * 1024, // 5GB for admin
+      storageQuota: adminQuota,
     }).returning();
     
     // Save VirusTotal API key if provided (optional malware scan on upload)
@@ -109,7 +121,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       'USER',
       user.id.toString(),
       { firstSetup: true },
-      request.ip,
+      getClientIp(request),
       request.headers['user-agent']
     );
     
@@ -133,14 +145,22 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     if (existing) {
       return reply.status(409).send({ ok: false, msg: 'Username already exists' });
     }
-    
+
+    // Cap new user quota by filesystem free (so we don't promise more than disk has)
+    let userQuota = DEFAULT_QUOTA_BYTES;
+    const backendStats = await getStats();
+    if (backendStats && backendStats.free < userQuota) {
+      userQuota = Math.max(0, backendStats.free);
+    }
+
     // Create user
     const [user] = await db.insert(schema.users).values({
       username,
       publicKeyPem: publicKey,
       encryptionPublicKeyPem: encryptionPublicKey,
+      storageQuota: userQuota,
     }).returning();
-    
+
     return { ok: true, userId: user.id, username: user.username };
   });
   
@@ -263,7 +283,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         deviceName,
         browser || null,
         os || null,
-        request.ip
+        getClientIp(request)
       );
     }
     
@@ -277,7 +297,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       userId: user.id,
       expiresAt,
       deviceInfo: (request.body as any).deviceInfo,
-      ipAddress: request.ip,
+      ipAddress: getClientIp(request),
       userAgent: request.headers['user-agent'],
     });
     
@@ -289,7 +309,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       'SESSION',
       undefined,
       { method: '2FA' in body.data && body.data.totp ? '2FA' : 'ECDSA' },
-      request.ip,
+      getClientIp(request),
       request.headers['user-agent']
     );
     
@@ -322,7 +342,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       'SESSION',
       undefined,
       undefined,
-      request.ip,
+      getClientIp(request),
       request.headers['user-agent']
     );
     
@@ -481,7 +501,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       'USER',
       user.id.toString(),
       { fields: Object.keys(updates) },
-      request.ip,
+      getClientIp(request),
       request.headers['user-agent']
     );
     
@@ -535,7 +555,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       'SESSION',
       id,
       undefined,
-      request.ip,
+      getClientIp(request),
       request.headers['user-agent']
     );
     
@@ -556,7 +576,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       token: currentToken,
       userId: user.id,
       expiresAt,
-      ipAddress: request.ip,
+      ipAddress: getClientIp(request),
       userAgent: request.headers['user-agent'],
     });
     
@@ -568,7 +588,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       'SESSION',
       undefined,
       undefined,
-      request.ip,
+      getClientIp(request),
       request.headers['user-agent']
     );
     
@@ -592,7 +612,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       'USER',
       user.id.toString(),
       undefined,
-      request.ip,
+      getClientIp(request),
       request.headers['user-agent']
     );
     

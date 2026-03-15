@@ -35,7 +35,7 @@ interface DashboardProps {
 }
 
 export default function Dashboard(props: DashboardProps) {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const [files, setFiles] = createSignal<FileItem[]>([]);
   const [currentFolder, setCurrentFolder] = createSignal<string | null>(null);
   const [currentFolderUid, setCurrentFolderUid] = createSignal<string | null>(null);
@@ -149,6 +149,16 @@ export default function Dashboard(props: DashboardProps) {
     }
   };
 
+  // Refresh user storage (so storage bar updates after upload/delete)
+  const refreshStorage = async () => {
+    try {
+      const data = await api.getCurrentUser();
+      if (data?.user) updateUser(data.user);
+    } catch (_) {
+      // Ignore; storage bar will update on next full refresh
+    }
+  };
+
   createEffect(() => {
     loadFiles();
   });
@@ -202,13 +212,15 @@ export default function Dashboard(props: DashboardProps) {
     }
   };
 
-  // Handle file upload
-  const handleUpload = async (fileList: FileList) => {
+  // Handle file upload (optional targetFolderId = upload into that folder; else current folder)
+  const handleUpload = async (fileList: FileList, targetFolderId?: string | null) => {
     const keys = getCurrentKeys();
     if (!keys) {
       toast.error('Please login again - keys not found');
       return;
     }
+
+    const parentId = targetFolderId !== undefined ? targetFolderId : currentFolder();
 
     for (const file of Array.from(fileList)) {
       try {
@@ -241,11 +253,12 @@ export default function Dashboard(props: DashboardProps) {
           wrappedKey,
           arrayBufferToBase64(iv),
           fileHash,
-          currentFolder() || undefined
+          parentId || undefined
         );
 
         setUploadProgress(null);
         loadFiles();
+        await refreshStorage();
       } catch (error: any) {
         console.error('Upload failed:', error);
         if (error?.data?.quotaExceeded) {
@@ -411,6 +424,7 @@ export default function Dashboard(props: DashboardProps) {
       await api.deleteFile(file.id);
       toast.success(`"${file.filename}" deleted successfully`);
       loadFiles();
+      await refreshStorage();
     } catch (error: any) {
       toast.error(`Failed to delete: ${error.message}`);
     }
@@ -538,6 +552,7 @@ export default function Dashboard(props: DashboardProps) {
 
     if (successCount > 0) {
       toast.success(`${successCount} item(s) deleted successfully`);
+      await refreshStorage();
     }
     if (failCount > 0) {
       toast.error(`Failed to delete ${failCount} item(s)`);
@@ -608,7 +623,14 @@ export default function Dashboard(props: DashboardProps) {
     e.preventDefault();
     e.stopPropagation();
     const dragged = draggedFile();
-    // Prevent dropping folder into itself
+    const hasExternalFiles = e.dataTransfer?.types?.includes('Files');
+    // External files from OS: allow drop to upload into this folder
+    if (hasExternalFiles) {
+      e.dataTransfer!.dropEffect = 'copy';
+      setDropTargetFolder(folderId);
+      return;
+    }
+    // Internal drag (move existing file/folder): prevent dropping folder into itself
     if (dragged && dragged.id !== folderId) {
       e.dataTransfer!.dropEffect = 'move';
       setDropTargetFolder(folderId);
@@ -623,12 +645,21 @@ export default function Dashboard(props: DashboardProps) {
   const handleFolderDrop = async (e: DragEvent, folderId: string) => {
     e.preventDefault();
     e.stopPropagation();
-    
+    setIsDragging(false);
+    setDropTargetFolder(null);
+
+    // External files from OS: upload into this folder
+    const files = e.dataTransfer?.files;
+    if (files?.length) {
+      handleUpload(files, folderId);
+      return;
+    }
+
+    // Internal drag: move existing file/folder
     const file = draggedFile();
     if (!file) return;
 
     setDraggedFile(null);
-    setDropTargetFolder(null);
 
     // Don't move to same parent
     if (file.parentId === folderId) return;
@@ -684,27 +715,28 @@ export default function Dashboard(props: DashboardProps) {
 
   return (
     <div class="pb-20">
-      {/* Top bar */}
-      <div class="flex items-center justify-between mb-6">
-        <div class="flex items-center gap-4">
-          {/* Breadcrumb */}
+      {/* Top bar: stacks on mobile */}
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
+        <div class="min-w-0 flex-1">
+          {/* Breadcrumb: scrolls horizontally on mobile */}
           <Breadcrumb items={folderPath()} onNavigate={navigateUp} />
         </div>
 
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 sm:gap-3 shrink-0 flex-wrap">
           <NotificationCenter />
           
           <button
             onClick={openCreateFolderModal}
-            class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm flex items-center gap-2"
+            class="px-3 py-2 sm:px-4 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm flex items-center gap-2 touch-target sm:min-h-0"
+            title="New Folder"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
             </svg>
-            New Folder
+            <span class="hidden sm:inline">New Folder</span>
           </button>
 
-          <label class="px-4 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg text-sm cursor-pointer flex items-center gap-2">
+          <label class="px-3 py-2 sm:px-4 bg-primary-600 hover:bg-primary-700 rounded-lg text-sm cursor-pointer flex items-center gap-2 touch-target sm:min-h-0">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
             </svg>
@@ -737,9 +769,9 @@ export default function Dashboard(props: DashboardProps) {
       </div>
 
       {/* Search & Filter Bar */}
-      <div class="mb-4 flex flex-wrap items-center gap-3">
+      <div class="mb-4 flex flex-wrap items-center gap-2 sm:gap-3">
         {/* Search Input */}
-        <div class="relative flex-1 min-w-[200px]">
+        <div class="relative flex-1 min-w-0 w-full sm:min-w-[200px] sm:w-auto">
           <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
@@ -766,7 +798,7 @@ export default function Dashboard(props: DashboardProps) {
         <select
           value={filterType()}
           onChange={(e) => setFilterType(e.currentTarget.value as any)}
-          class="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          class="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 min-w-0"
         >
           <option value="all">All Types</option>
           <option value="folders">📁 Folders</option>
@@ -814,19 +846,19 @@ export default function Dashboard(props: DashboardProps) {
 
       {/* Bulk Actions Bar */}
       <Show when={selectedFiles().size > 0}>
-        <div class="mb-4 bg-primary-600/20 border border-primary-500 rounded-lg p-3 flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <span class="text-primary-300 font-medium">
+        <div class="mb-4 bg-primary-600/20 border border-primary-500 rounded-lg p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div class="flex items-center gap-3 min-w-0">
+            <span class="text-primary-300 font-medium truncate">
               {selectedFiles().size} item(s) selected
             </span>
             <button
               onClick={clearSelection}
-              class="text-primary-400 hover:text-primary-300 text-sm underline"
+              class="text-primary-400 hover:text-primary-300 text-sm underline shrink-0"
             >
               Clear selection
             </button>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
             <button
               onClick={openBulkMove}
               class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm flex items-center gap-2 text-white"
@@ -900,9 +932,9 @@ export default function Dashboard(props: DashboardProps) {
         </Show>
 
         <Show when={!isLoading() && filteredFiles().length > 0}>
-          <div class="rounded-lg border border-gray-700">
-            <div class="overflow-x-auto">
-              <table class="w-full">
+          <div class="rounded-lg border border-gray-700 overflow-hidden">
+            <div class="overflow-x-auto -mx-px">
+              <table class="w-full min-w-[500px]">
                 <thead class="bg-gray-800">
                   <tr>
                     <th class="w-10 px-4 py-3">
@@ -988,9 +1020,13 @@ export default function Dashboard(props: DashboardProps) {
                                 setMenuPosition(null);
                               } else {
                                 const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                const menuW = 192;
+                                const pad = 8;
+                                let left = rect.right - menuW;
+                                left = Math.max(pad, Math.min(left, window.innerWidth - menuW - pad));
                                 setMenuPosition({ 
                                   top: rect.bottom + 4, 
-                                  left: rect.right - 192 // 192px = w-48
+                                  left
                                 });
                                 setOpenMenuId(file.id);
                               }
@@ -1022,7 +1058,7 @@ export default function Dashboard(props: DashboardProps) {
           const pos = menuPosition()!;
           return (
             <div 
-              class="fixed w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 action-menu-container"
+              class="fixed w-48 max-w-[calc(100vw-1rem)] bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 action-menu-container"
               style={{ top: `${pos.top}px`, left: `${pos.left}px` }}
             >
               {!file.isFolder && isPreviewable(file.filename) && (
@@ -1102,8 +1138,8 @@ export default function Dashboard(props: DashboardProps) {
 
       {/* Preview Modal */}
       <Show when={previewFile()}>
-        <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={closePreview}>
-          <div class="bg-gray-800 rounded-xl max-w-5xl max-h-[90vh] w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-2 sm:p-4" onClick={closePreview}>
+          <div class="bg-gray-800 rounded-xl max-w-5xl max-h-[calc(100vh-2rem)] w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
             {/* Modal Header */}
             <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700">
               <h3 class="text-lg font-medium text-white truncate">{previewFile()?.filename}</h3>

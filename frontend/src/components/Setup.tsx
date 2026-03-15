@@ -1,7 +1,7 @@
 import { createSignal, Show } from 'solid-js';
 import * as api from '../lib/api';
 import {
-  generateEncryptedKeyBundle,
+  generateKeyBundle,
   downloadKeyBundle,
 } from '../lib/crypto';
 
@@ -9,35 +9,12 @@ interface SetupProps {
   onComplete: () => void;
 }
 
-// Password strength checker
-function checkPasswordStrength(password: string): { score: number; label: string; color: string } {
-  let score = 0;
-  
-  if (password.length >= 8) score++;
-  if (password.length >= 12) score++;
-  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score++;
-  if (/[0-9]/.test(password)) score++;
-  if (/[^a-zA-Z0-9]/.test(password)) score++;
-  
-  if (score <= 1) return { score, label: 'Weak', color: 'bg-red-500' };
-  if (score <= 2) return { score, label: 'Fair', color: 'bg-orange-500' };
-  if (score <= 3) return { score, label: 'Good', color: 'bg-yellow-500' };
-  if (score <= 4) return { score, label: 'Strong', color: 'bg-green-500' };
-  return { score, label: 'Very Strong', color: 'bg-green-600' };
-}
-
 export default function Setup(props: SetupProps) {
   const [step, setStep] = createSignal<'welcome' | 'create' | 'success'>('welcome');
   const [username, setUsername] = createSignal('');
-  const [password, setPassword] = createSignal('');
-  const [confirmPassword, setConfirmPassword] = createSignal('');
-  const [showPassword, setShowPassword] = createSignal(false);
   const [virusTotalApiKey, setVirusTotalApiKey] = createSignal('');
   const [error, setError] = createSignal('');
   const [isLoading, setIsLoading] = createSignal(false);
-
-  const passwordStrength = () => checkPasswordStrength(password());
-  const passwordsMatch = () => password() === confirmPassword();
 
   const handleCreateAdmin = async (e: Event) => {
     e.preventDefault();
@@ -54,37 +31,22 @@ export default function Setup(props: SetupProps) {
       return;
     }
 
-    if (password().length < 8) {
-      setError('Password must be at least 8 characters');
-      return;
-    }
-
-    if (!passwordsMatch()) {
-      setError('Passwords do not match');
-      return;
-    }
-
-    if (passwordStrength().score < 3) {
-      setError('Password is too weak. Use a mix of uppercase, lowercase, numbers, and symbols.');
-      return;
-    }
-
     setIsLoading(true);
 
     try {
-      // Generate password-encrypted key bundle
-      const { bundle, plainKeys } = await generateEncryptedKeyBundle(password());
+      // Generate key bundle
+      const keys = await generateKeyBundle();
 
       // Create admin account (optional VirusTotal API key for malware scan on upload)
       await api.setupAdmin(
         username(),
-        plainKeys.signingPublicKey,
-        plainKeys.encryptionPublicKey,
+        keys.signingPublicKey,
+        keys.encryptionPublicKey,
         virusTotalApiKey().trim() || undefined
       );
 
-      // Download encrypted keys
-      downloadKeyBundle(bundle, username());
+      // Download keys file
+      downloadKeyBundle(keys, username());
 
       setStep('success');
     } catch (err: any) {
@@ -121,15 +83,14 @@ export default function Setup(props: SetupProps) {
                 <h3 class="font-medium text-primary-400 mb-2">What you'll do:</h3>
                 <ul class="list-disc list-inside space-y-1 text-sm">
                   <li>Create an admin username</li>
-                  <li>Set a master password for your encryption keys</li>
-                  <li>Download your encrypted key file</li>
+                  <li>Download your key file</li>
                 </ul>
               </div>
 
               <div class="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
                 <h3 class="font-medium text-yellow-400 mb-2">⚠️ Important:</h3>
                 <p class="text-sm">
-                  Your encryption keys will be stored in a file protected by your password. 
+                  Your encryption keys will be stored in a file. 
                   <strong> Keep this file safe!</strong> Without it, you cannot access your account.
                 </p>
               </div>
@@ -190,55 +151,6 @@ export default function Setup(props: SetupProps) {
               </div>
 
               <div class="mb-4">
-                <label class="block text-gray-400 text-sm mb-2">Master Password</label>
-                <div class="relative">
-                  <input
-                    type={showPassword() ? 'text' : 'password'}
-                    value={password()}
-                    onInput={(e) => setPassword(e.currentTarget.value)}
-                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 pr-12 text-white focus:outline-none focus:border-primary-500"
-                    placeholder="Create a strong password"
-                    minLength={8}
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword())}
-                    class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
-                  >
-                    <Show when={showPassword()} fallback={
-                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                      </svg>
-                    }>
-                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                      </svg>
-                    </Show>
-                  </button>
-                </div>
-                {/* Password strength indicator */}
-                <Show when={password().length > 0}>
-                  <div class="mt-2">
-                    <div class="flex gap-1 mb-1">
-                      {[1, 2, 3, 4, 5].map((i) => (
-                        <div 
-                          class={`h-1 flex-1 rounded ${i <= passwordStrength().score ? passwordStrength().color : 'bg-gray-600'}`}
-                        />
-                      ))}
-                    </div>
-                    <p class={`text-xs ${passwordStrength().score >= 3 ? 'text-green-400' : 'text-yellow-400'}`}>
-                      Password strength: {passwordStrength().label}
-                    </p>
-                  </div>
-                </Show>
-                <p class="text-gray-500 text-xs mt-1">
-                  This password encrypts your private keys. Choose wisely!
-                </p>
-              </div>
-
-              <div class="mb-4">
                 <label class="block text-gray-400 text-sm mb-2">VirusTotal API key (optional)</label>
                 <input
                   type="password"
@@ -253,29 +165,10 @@ export default function Setup(props: SetupProps) {
                 </p>
               </div>
 
-              <div class="mb-6">
-                <label class="block text-gray-400 text-sm mb-2">Confirm Password</label>
-                <input
-                  type={showPassword() ? 'text' : 'password'}
-                  value={confirmPassword()}
-                  onInput={(e) => setConfirmPassword(e.currentTarget.value)}
-                  class={`w-full bg-gray-700 border rounded-lg px-4 py-3 text-white focus:outline-none ${
-                    confirmPassword() && !passwordsMatch() 
-                      ? 'border-red-500 focus:border-red-500' 
-                      : 'border-gray-600 focus:border-primary-500'
-                  }`}
-                  placeholder="Confirm your password"
-                  required
-                />
-                <Show when={confirmPassword() && !passwordsMatch()}>
-                  <p class="text-red-400 text-xs mt-1">Passwords do not match</p>
-                </Show>
-              </div>
-
               <button
                 type="submit"
-                disabled={isLoading() || !passwordsMatch() || password().length < 8}
-                class="w-full bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 text-white font-medium py-3 rounded-lg transition-colors"
+                disabled={isLoading()}
+                class="w-full mb-6 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 text-white font-medium py-3 rounded-lg transition-colors"
               >
                 <Show when={isLoading()} fallback="Create Admin Account">
                   <span class="flex items-center justify-center gap-2">
@@ -313,17 +206,10 @@ export default function Setup(props: SetupProps) {
             <h2 class="text-2xl font-bold mb-2">Setup Complete! 🎉</h2>
             <p class="text-gray-400 mb-6">Your SecureVault admin account has been created.</p>
             
-            <div class="bg-yellow-500/20 border border-yellow-500 rounded-lg p-4 mb-4">
+            <div class="bg-yellow-500/20 border border-yellow-500 rounded-lg p-4 mb-6">
               <p class="text-yellow-300 text-sm">
-                <strong>⚠️ Important:</strong> Your encrypted keys file has been downloaded. 
+                <strong>⚠️ Important:</strong> Your keys file has been downloaded. 
                 Store it safely — you'll need it to log in!
-              </p>
-            </div>
-
-            <div class="bg-green-500/20 border border-green-500 rounded-lg p-4 mb-6">
-              <p class="text-green-300 text-sm">
-                <strong>🔐 Security Note:</strong> Your private keys are encrypted with your password. 
-                Even if someone gets your keys file, they cannot use it without your password.
               </p>
             </div>
 

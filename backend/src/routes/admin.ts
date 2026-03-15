@@ -11,6 +11,12 @@ import {
   removeVirusTotalKey,
   getVirusTotalUsageSummary,
 } from '../lib/virustotal.js';
+import {
+  getMalwareBazaarApiKeyMasked,
+  setMalwareBazaarApiKey,
+} from '../lib/malwarebazaar.js';
+import { getStats } from '../lib/storage.js';
+import { getClientIp } from '../lib/clientIp.js';
 import { z } from 'zod';
 
 // Admin middleware - checks if user is admin
@@ -75,10 +81,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   
   // ============ ADMIN SETTINGS (VirusTotal etc.) ============
   app.get('/api/admin/settings', { preHandler: requireAdmin }, async (_request: AuthenticatedRequest, reply) => {
-    const apiKey = await getVirusTotalApiKey();
+    const [vtKey, mb] = await Promise.all([
+      getVirusTotalApiKey(),
+      getMalwareBazaarApiKeyMasked(),
+    ]);
     return {
       ok: true,
-      virusTotalConfigured: !!(apiKey && apiKey.length > 0),
+      virusTotalConfigured: !!(vtKey && vtKey.length > 0),
+      malwareBazaarConfigured: mb.configured,
+      malwareBazaarMaskedKey: mb.maskedKey,
     };
   });
 
@@ -141,6 +152,31 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true, keys, usage };
   });
 
+  // ============ MALWARE BAZAAR API KEY ============
+  app.get('/api/admin/malwarebazaar', { preHandler: requireAdmin }, async (_request: AuthenticatedRequest, reply) => {
+    const mb = await getMalwareBazaarApiKeyMasked();
+    return { ok: true, configured: mb.configured, maskedKey: mb.maskedKey };
+  });
+
+  const setMalwareBazaarKeySchema = z.object({
+    apiKey: z.string().max(500),
+  });
+
+  app.post('/api/admin/malwarebazaar', { preHandler: requireAdmin }, async (request: AuthenticatedRequest, reply) => {
+    const body = setMalwareBazaarKeySchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid request' });
+    }
+    await setMalwareBazaarApiKey(body.data.apiKey.trim() || null);
+    const mb = await getMalwareBazaarApiKeyMasked();
+    return { ok: true, configured: mb.configured, maskedKey: mb.maskedKey };
+  });
+
+  app.delete('/api/admin/malwarebazaar', { preHandler: requireAdmin }, async (_request: AuthenticatedRequest, reply) => {
+    await setMalwareBazaarApiKey(null);
+    return { ok: true, configured: false, maskedKey: null };
+  });
+
   // ============ ADMIN DASHBOARD STATS ============
   app.get('/api/admin/stats', { preHandler: requireAdmin }, async (request: AuthenticatedRequest, reply) => {
     // Get total users count
@@ -171,7 +207,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       .from(schema.users)
       .where(eq(schema.users.isSuspended, true));
     const suspendedUsers = suspendedResult?.count || 0;
-    
+
+    // Backend filesystem capacity (total storage follows disk/mount)
+    const storageBackend = await getStats();
+
     return {
       ok: true,
       stats: {
@@ -180,6 +219,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         activeSessions,
         totalFiles,
         suspendedUsers,
+        storageBackend: storageBackend ? { total: storageBackend.total, free: storageBackend.free } : null,
       },
     };
   });
@@ -273,7 +313,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       'USER',
       userId,
       { targetUsername: user.username },
-      request.ip,
+      getClientIp(request),
       request.headers['user-agent']
     );
     
@@ -291,20 +331,29 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ ok: false, msg: 'Invalid request' });
     }
     
-    const { quota } = body.data;
-    
+    let { quota } = body.data;
+
     const user = await db.query.users.findFirst({
       where: eq(schema.users.id, userIdNum),
     });
-    
+
     if (!user) {
       return reply.status(404).send({ ok: false, msg: 'User not found' });
     }
-    
+
+    // Cap quota by filesystem: don't allow more than (free + this user's current used)
+    const backendStats = await getStats();
+    if (backendStats) {
+      const maxAssignable = backendStats.free + (user.storageUsed ?? 0);
+      if (quota > maxAssignable) {
+        quota = maxAssignable;
+      }
+    }
+
     await db.update(schema.users)
       .set({ storageQuota: quota })
       .where(eq(schema.users.id, userIdNum));
-    
+
     // Log audit
     await logAudit(
       admin.id,
@@ -313,7 +362,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       'USER',
       userId,
       { targetUsername: user.username, oldQuota: user.storageQuota, newQuota: quota },
-      request.ip,
+      getClientIp(request),
       request.headers['user-agent']
     );
     
@@ -417,7 +466,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       'SESSION',
       sessionId,
       { targetUserId: session.userId },
-      request.ip,
+      getClientIp(request),
       request.headers['user-agent']
     );
     
