@@ -4,7 +4,7 @@ import * as api from '../lib/api';
 import type { FileItem } from '../lib/api';
 import { toast } from '../stores/toast';
 import { SkeletonFileViewer } from './Skeleton';
-import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile } from './FilePreview';
+import { CsvPreview, ExcelPreview, WordPreview, TextPreview, getPreviewMimeType, isPreviewableFile } from './FilePreview';
 import {
   getCurrentKeys,
   importEncryptionPrivateKey,
@@ -274,9 +274,7 @@ export default function FileViewer(props: FileViewerProps) {
       return <WordPreview url={url} />;
     }
     if (mime.startsWith('text/') || mime === 'application/json') {
-      return (
-        <iframe src={url} class="w-full h-[70vh] rounded-lg bg-gray-900 text-gray-300" />
-      );
+      return <TextPreview url={url} filename={f.filename} />;
     }
 
     // Non-previewable file
