@@ -32,6 +32,16 @@ function isPreviewable(filename: string): boolean {
 
 interface DashboardProps {
   navigate?: (path: string) => void;
+  /** When provided, Dashboard will load this folder/file by UID and sync breadcrumbs. */
+  uid?: string | null;
+  /** Sidebar section (My Drive / Shared / Trash). */
+  section?: 'drive' | 'shared' | 'trash';
+  /** Used to normalize the URL back to `/` when leaving folder views. */
+  onRequestNavigateRoot?: () => void;
+  /** Global search query from header. */
+  globalSearch?: string;
+  /** Update global search query from Dashboard interactions (optional). */
+  onGlobalSearchChange?: (query: string) => void;
 }
 
 export default function Dashboard(props: DashboardProps) {
@@ -79,6 +89,13 @@ export default function Dashboard(props: DashboardProps) {
   // Action menu dropdown state
   const [openMenuId, setOpenMenuId] = createSignal<string | null>(null);
   const [menuPosition, setMenuPosition] = createSignal<{ top: number; left: number } | null>(null);
+  const section = () => props.section || 'drive';
+
+  // Sync local search with global header search
+  createEffect(() => {
+    const q = props.globalSearch ?? '';
+    if (q !== searchQuery()) setSearchQuery(q);
+  });
 
   // File type detection helpers
   const getFileCategory = (filename: string, isFolder: boolean): string => {
@@ -136,12 +153,52 @@ export default function Dashboard(props: DashboardProps) {
     return result;
   };
 
-  // Load files
+  // Load files for the active section
   const loadFiles = async () => {
     setIsLoading(true);
     try {
-      const result = await api.listFiles(currentFolder() || undefined);
-      setFiles(result.files);
+      if (section() === 'drive') {
+        const result = await api.listFiles(currentFolder() || undefined);
+        setFiles(result.files);
+        return;
+      }
+      if (section() === 'shared') {
+        const result = await api.getSharedWithMe();
+        // Map to FileItem shape (owner shown via filename suffix for now in UI layer below)
+        setFiles(
+          result.files.map((f: any) => ({
+            id: f.id,
+            uid: undefined,
+            filename: f.filename,
+            fileSize: f.fileSize,
+            isFolder: f.isFolder,
+            parentId: null,
+            createdAt: f.sharedAt,
+            encryptedKey: f.encryptedKey,
+            iv: f.iv,
+            // @ts-expect-error - UI-only field, not part of FileItem
+            owner: f.owner,
+          }))
+        );
+        return;
+      }
+      if (section() === 'trash') {
+        const result = await api.getTrash();
+        setFiles(
+          result.files.map((f: any) => ({
+            id: f.id,
+            uid: undefined,
+            filename: f.filename,
+            fileSize: f.fileSize,
+            isFolder: f.isFolder,
+            parentId: null,
+            createdAt: f.deletedAt,
+            encryptedKey: '',
+            iv: '',
+          }))
+        );
+        return;
+      }
     } catch (error) {
       console.error('Failed to load files:', error);
     } finally {
@@ -160,7 +217,47 @@ export default function Dashboard(props: DashboardProps) {
   };
 
   createEffect(() => {
+    // Re-load when folder, section, or UID changes (UID effect below can also trigger load)
+    section();
+    currentFolder();
     loadFiles();
+  });
+
+  // If route UID is provided (/f/:uid), hydrate currentFolder + breadcrumb path to match
+  createEffect(() => {
+    const uid = props.uid;
+    if (!uid) return;
+    if (section() !== 'drive') return; // only meaningful for My Drive
+
+    (async () => {
+      try {
+        const result = await api.getFileByUid(uid);
+        if (!result?.file) return;
+
+        const root = { id: null, uid: null, name: 'My Files' as const };
+        const parents = (result.parentPath || []).map((p) => ({ id: p.id, uid: p.uid, name: p.name }));
+        const current = { id: result.file.id, uid: result.file.uid || null, name: result.file.filename };
+
+        if (result.file.isFolder) {
+          setFolderPath([root, ...parents, current]);
+          setCurrentFolderUid(result.file.uid || null);
+          setCurrentFolder(result.file.id);
+        } else {
+          // If UID points to a file, keep folder context but open preview (if possible)
+          setFolderPath([root, ...parents]);
+          setCurrentFolderUid(parents.length ? parents[parents.length - 1].uid : null);
+          setCurrentFolder(parents.length ? parents[parents.length - 1].id : null);
+          // Open file preview
+          await handleOpen(result.file);
+        }
+      } catch (e) {
+        // If the UID isn't accessible, fall back to root
+        setFolderPath([{ id: null, uid: null, name: 'My Files' }]);
+        setCurrentFolderUid(null);
+        setCurrentFolder(null);
+        props.onRequestNavigateRoot?.();
+      }
+    })();
   });
 
   // Close menu when clicking outside
@@ -197,7 +294,7 @@ export default function Dashboard(props: DashboardProps) {
     const lastItem = newPath[newPath.length - 1];
     setCurrentFolder(lastItem.id);
     setCurrentFolderUid(lastItem.uid);
-    // Update URL so App switches to FileViewer when needed
+    // Update URL so deep links remain stable
     if (props.navigate) {
       if (lastItem.uid) props.navigate(`/f/${lastItem.uid}`);
       else props.navigate('/');
@@ -309,7 +406,7 @@ export default function Dashboard(props: DashboardProps) {
   };
 
   // Handle open/preview file
-  const handleOpen = async (file: FileItem) => {
+  async function handleOpen(file: FileItem) {
     const keys = getCurrentKeys();
     if (!keys) {
       toast.error('Please login again - keys not found');
@@ -345,7 +442,7 @@ export default function Dashboard(props: DashboardProps) {
       toast.error(`Failed to open: ${error.message}`);
       setUploadProgress(null);
     }
-  };
+  }
 
   // Close preview
   const closePreview = () => {
@@ -698,142 +795,109 @@ export default function Dashboard(props: DashboardProps) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
-  // Storage usage
-  const storagePercent = () => {
-    const u = user();
-    if (!u) return 0;
-    return Math.round((u.storageUsed / u.storageQuota) * 100);
-  };
-
   return (
     <div class="pb-20">
       {/* Top bar: stacks on mobile */}
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
         <div class="min-w-0 flex-1">
-          {/* Breadcrumb: scrolls horizontally on mobile */}
-          <Breadcrumb items={folderPath()} onNavigate={navigateUp} />
+          <Show
+            when={section() === 'drive'}
+            fallback={
+              <div class="flex items-center gap-2">
+                <h2 class="text-lg sm:text-xl font-semibold text-white">
+                  {section() === 'shared' ? 'Shared with me' : 'Trash'}
+                </h2>
+              </div>
+            }
+          >
+            {/* Breadcrumb: scrolls horizontally on mobile */}
+            <Breadcrumb items={folderPath()} onNavigate={navigateUp} />
+          </Show>
         </div>
 
         <div class="flex items-center gap-2 sm:gap-3 shrink-0 flex-wrap">
           <NotificationCenter />
           
-          <button
-            onClick={openCreateFolderModal}
-            class="px-3 py-2 sm:px-4 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm flex items-center gap-2 touch-target sm:min-h-0"
-            title="New Folder"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-            </svg>
-            <span class="hidden sm:inline">New Folder</span>
-          </button>
-
-          <label class="px-3 py-2 sm:px-4 bg-primary-600 hover:bg-primary-700 rounded-lg text-sm cursor-pointer flex items-center gap-2 touch-target sm:min-h-0">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
-            Upload
-            <input
-              type="file"
-              multiple
-              accept="*/*"
-              class="hidden"
-              onChange={(e) => e.target.files && handleUpload(e.target.files)}
-            />
-          </label>
-        </div>
-      </div>
-
-      {/* Storage indicator */}
-      <div class="mb-6 bg-gray-800 rounded-lg p-4">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-sm text-gray-400">Storage Used</span>
-          <span class="text-sm text-white">
-            {formatSize(user()?.storageUsed || 0)} / {formatSize(user()?.storageQuota || 0)}
-          </span>
-        </div>
-        <div class="w-full bg-gray-700 rounded-full h-2">
-          <div
-            class="bg-primary-500 h-2 rounded-full transition-all"
-            style={{ width: `${storagePercent()}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Search & Filter Bar */}
-      <div class="mb-4 flex flex-wrap items-center gap-2 sm:gap-3">
-        {/* Search Input */}
-        <div class="relative flex-1 min-w-0 w-full sm:min-w-[200px] sm:w-auto">
-          <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            type="text"
-            placeholder="Search files..."
-            value={searchQuery()}
-            onInput={(e) => setSearchQuery(e.currentTarget.value)}
-            class="w-full pl-10 pr-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-          />
-          <Show when={searchQuery()}>
+          <Show when={section() === 'drive'}>
             <button
-              onClick={() => setSearchQuery('')}
-              class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+              onClick={openCreateFolderModal}
+              class="px-3 py-2 sm:px-4 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm flex items-center gap-2 touch-target sm:min-h-0"
+              title="New Folder"
             >
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
               </svg>
+              <span class="hidden sm:inline">New Folder</span>
             </button>
+
+            <label class="px-3 py-2 sm:px-4 bg-primary-600 hover:bg-primary-700 rounded-lg text-sm cursor-pointer flex items-center gap-2 touch-target sm:min-h-0">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              Upload
+              <input
+                type="file"
+                multiple
+                accept="*/*"
+                class="hidden"
+                onChange={(e) => e.target.files && handleUpload(e.target.files)}
+              />
+            </label>
           </Show>
         </div>
+      </div>
 
-        {/* Filter by Type */}
-        <select
-          value={filterType()}
-          onChange={(e) => setFilterType(e.currentTarget.value as any)}
-          class="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 min-w-0"
-        >
-          <option value="all">All Types</option>
-          <option value="folders">📁 Folders</option>
-          <option value="images">🖼️ Images</option>
-          <option value="documents">📄 Documents</option>
-          <option value="videos">🎬 Videos</option>
-          <option value="audio">🎵 Audio</option>
-        </select>
+      {/* Filters */}
+      <div class="mb-4 flex flex-wrap items-center gap-2 sm:gap-3">
 
-        {/* Sort By */}
-        <select
-          value={sortBy()}
-          onChange={(e) => setSortBy(e.currentTarget.value as any)}
-          class="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-        >
-          <option value="name">Sort by Name</option>
-          <option value="date">Sort by Date</option>
-          <option value="size">Sort by Size</option>
-        </select>
+          {/* Filter by Type */}
+          <select
+            value={filterType()}
+            onChange={(e) => setFilterType(e.currentTarget.value as any)}
+            class="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 min-w-0"
+          >
+            <option value="all">All Types</option>
+            <option value="folders">📁 Folders</option>
+            <option value="images">🖼️ Images</option>
+            <option value="documents">📄 Documents</option>
+            <option value="videos">🎬 Videos</option>
+            <option value="audio">🎵 Audio</option>
+          </select>
 
-        {/* Sort Order Toggle */}
-        <button
-          onClick={() => setSortOrder(sortOrder() === 'asc' ? 'desc' : 'asc')}
-          class="p-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
-          title={sortOrder() === 'asc' ? 'Ascending' : 'Descending'}
-        >
-          <Show when={sortOrder() === 'asc'} fallback={
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4" />
-            </svg>
-          }>
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
-            </svg>
+          {/* Sort By */}
+          <select
+            value={sortBy()}
+            onChange={(e) => setSortBy(e.currentTarget.value as any)}
+            class="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="name">Sort by Name</option>
+            <option value="date">Sort by Date</option>
+            <option value="size">Sort by Size</option>
+          </select>
+
+          {/* Sort Order Toggle */}
+          <button
+            onClick={() => setSortOrder(sortOrder() === 'asc' ? 'desc' : 'asc')}
+            class="p-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
+            title={sortOrder() === 'asc' ? 'Ascending' : 'Descending'}
+          >
+            <Show when={sortOrder() === 'asc'} fallback={
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4" />
+              </svg>
+            }>
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
+              </svg>
+            </Show>
+          </button>
+
+          {/* Results count */}
+          <Show when={searchQuery() || filterType() !== 'all'}>
+            <span class="text-gray-400 text-sm">
+              {filteredFiles().length} result(s)
+            </span>
           </Show>
-        </button>
-
-        {/* Results count */}
-        <Show when={searchQuery() || filterType() !== 'all'}>
-          <span class="text-gray-400 text-sm">
-            {filteredFiles().length} result(s)
-          </span>
-        </Show>
       </div>
 
       {/* Bulk Actions Bar */}
@@ -886,10 +950,10 @@ export default function Dashboard(props: DashboardProps) {
 
       {/* Drop zone / File list */}
       <div
-        class={`drop-zone ${isDragging() ? 'dragover' : ''}`}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
+        class={section() === 'drive' ? `drop-zone ${isDragging() ? 'dragover' : ''}` : 'rounded-xl'}
+        onDragOver={section() === 'drive' ? handleDragOver : undefined}
+        onDragLeave={section() === 'drive' ? handleDragLeave : undefined}
+        onDrop={section() === 'drive' ? handleDrop : undefined}
       >
         <Show when={isLoading()}>
           <SkeletonDashboard />
@@ -901,8 +965,17 @@ export default function Dashboard(props: DashboardProps) {
             <svg class="w-16 h-16 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
-            <p class="text-gray-400 mb-2">Drag and drop files here</p>
-            <p class="text-gray-500 text-sm">or click Upload button above</p>
+            <Show
+              when={section() === 'drive'}
+              fallback={
+                <p class="text-gray-400">
+                  {section() === 'shared' ? 'No files have been shared with you yet.' : 'Trash is empty.'}
+                </p>
+              }
+            >
+              <p class="text-gray-400 mb-2">Drag and drop files here</p>
+              <p class="text-gray-500 text-sm">or click Upload button above</p>
+            </Show>
           </div>
         </Show>
 
@@ -980,19 +1053,48 @@ export default function Dashboard(props: DashboardProps) {
                           {/* File/Folder name with click to preview for files */}
                           {file.isFolder ? (
                             <button
-                              onClick={() => navigateToFolder(file.id, file.filename, file.uid)}
-                              class="text-white hover:text-primary-400"
+                              type="button"
+                              onClick={() => {
+                                if (section() !== 'drive') {
+                                  toast.info('Folder navigation is only available in My Drive.');
+                                  return;
+                                }
+                                navigateToFolder(file.id, file.filename, file.uid);
+                              }}
+                              class="text-white hover:text-primary-400 text-left"
                             >
                               {file.filename}
+                              <Show when={(file as any).owner}>
+                                <div class="text-xs text-gray-500 mt-0.5">
+                                  Shared by {(file as any).owner}
+                                </div>
+                              </Show>
                             </button>
                           ) : (
-                            <span 
-                              class={`text-white ${isPreviewable(file.filename) ? 'cursor-pointer hover:text-primary-400' : ''}`}
-                              onClick={() => isPreviewable(file.filename) && handleOpen(file)}
-                              title={isPreviewable(file.filename) ? 'Click to preview' : ''}
+                            <button
+                              type="button"
+                              class={`text-left ${
+                                section() === 'trash'
+                                  ? 'text-gray-400 cursor-default'
+                                  : `text-white ${isPreviewable(file.filename) ? 'hover:text-primary-400' : ''}`
+                              }`}
+                              disabled={section() === 'trash'}
+                              onClick={() => section() !== 'trash' && isPreviewable(file.filename) && handleOpen(file)}
+                              title={
+                                section() === 'trash'
+                                  ? 'Preview is not available in Trash'
+                                  : isPreviewable(file.filename)
+                                    ? 'Click to preview'
+                                    : ''
+                              }
                             >
                               {file.filename}
-                            </span>
+                              <Show when={(file as any).owner}>
+                                <div class="text-xs text-gray-500 mt-0.5">
+                                  Shared by {(file as any).owner}
+                                </div>
+                              </Show>
+                            </button>
                           )}
                         </div>
                       </td>
@@ -1053,7 +1155,7 @@ export default function Dashboard(props: DashboardProps) {
               class="fixed w-48 max-w-[calc(100vw-1rem)] bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 action-menu-container"
               style={{ top: `${pos.top}px`, left: `${pos.left}px` }}
             >
-              {!file.isFolder && isPreviewable(file.filename) && (
+              {section() !== 'trash' && !file.isFolder && isPreviewable(file.filename) && (
                 <button
                   onClick={() => { handleOpen(file); setOpenMenuId(null); setMenuPosition(null); }}
                   class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2 rounded-t-lg"
@@ -1065,45 +1167,47 @@ export default function Dashboard(props: DashboardProps) {
                   Open/Preview
                 </button>
               )}
-              <button
-                onClick={() => { openRenameModal(file); setOpenMenuId(null); setMenuPosition(null); }}
-                class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                </svg>
-                Rename
-              </button>
-              <button
-                onClick={() => { openMoveModal(file); setOpenMenuId(null); setMenuPosition(null); }}
-                class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-                </svg>
-                Move
-              </button>
-              <button
-                onClick={() => { setShareFile(file); setOpenMenuId(null); setMenuPosition(null); }}
-                class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                </svg>
-                Share
-              </button>
-              {!file.isFolder && file.uid && (
+              <Show when={section() === 'drive'}>
                 <button
-                  onClick={() => { copyUIDLink(file); setOpenMenuId(null); setMenuPosition(null); }}
+                  onClick={() => { openRenameModal(file); setOpenMenuId(null); setMenuPosition(null); }}
                   class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
                 >
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                   </svg>
-                  Copy Direct Link
+                  Rename
                 </button>
-              )}
-              {!file.isFolder && (
+                <button
+                  onClick={() => { openMoveModal(file); setOpenMenuId(null); setMenuPosition(null); }}
+                  class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+                  </svg>
+                  Move
+                </button>
+                <button
+                  onClick={() => { setShareFile(file); setOpenMenuId(null); setMenuPosition(null); }}
+                  class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                  </svg>
+                  Share
+                </button>
+                {!file.isFolder && file.uid && (
+                  <button
+                    onClick={() => { copyUIDLink(file); setOpenMenuId(null); setMenuPosition(null); }}
+                    class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    </svg>
+                    Copy Direct Link
+                  </button>
+                )}
+              </Show>
+              {section() !== 'trash' && !file.isFolder && (
                 <button
                   onClick={() => { handleDownload(file); setOpenMenuId(null); setMenuPosition(null); }}
                   class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
@@ -1114,15 +1218,17 @@ export default function Dashboard(props: DashboardProps) {
                   Download
                 </button>
               )}
-              <button
-                onClick={() => { handleDelete(file); setOpenMenuId(null); setMenuPosition(null); }}
-                class="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-gray-700 flex items-center gap-2 rounded-b-lg"
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-                Delete
-              </button>
+              <Show when={section() === 'drive'}>
+                <button
+                  onClick={() => { handleDelete(file); setOpenMenuId(null); setMenuPosition(null); }}
+                  class="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-gray-700 flex items-center gap-2 rounded-b-lg"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Delete
+                </button>
+              </Show>
             </div>
           );
         })()}

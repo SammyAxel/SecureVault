@@ -62,16 +62,16 @@ body {
 }
 
 /* Draggable file cursor */
-.file-item[draggable="true"] {
+.file-item[draggable='true'] {
   cursor: grab;
 }
 
-.file-item[draggable="true"]:active {
+.file-item[draggable='true']:active {
   cursor: grabbing;
 }
 
 /* Custom checkbox styling */
-input[type="checkbox"] {
+input[type='checkbox'] {
   @apply accent-primary-500;
 }
 
@@ -131,3 +131,4 @@ input[type="checkbox"] {
 .avatar-cropper-area .cropper-face {
   border-radius: 50%;
 }
+

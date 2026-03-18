@@ -9,7 +9,8 @@ import Setup from './components/Setup';
 import ToastContainer from './components/Toast';
 import ConfirmModal from './components/ConfirmModal';
 import PublicShare from './components/PublicShare';
-import FileViewer from './components/FileViewer';
+import Sidebar, { type DriveSection } from './components/Sidebar';
+import Home from './components/Home';
 import * as api from './lib/api';
 
 // Simple path-based routing
@@ -36,6 +37,8 @@ function AppContent() {
   const [needsSetup, setNeedsSetup] = createSignal(false);
   const [checkingSetup, setCheckingSetup] = createSignal(true);
   const { path, navigate } = useRoute();
+  const [driveSection, setDriveSection] = createSignal<DriveSection>('home');
+  const [globalSearch, setGlobalSearch] = createSignal('');
   
   // Check if we're on admin page
   const isAdminPage = () => path() === '/admin';
@@ -48,6 +51,13 @@ function AppContent() {
     const match = path().match(/^\/f\/([a-zA-Z0-9-]+)/);
     return match ? match[1] : null;
   };
+  
+  // If a deep link to /f/:uid is opened, ensure the sidebar is on My Drive
+  createEffect(() => {
+    if (getUIDFromPath() && driveSection() !== 'drive') {
+      setDriveSection('drive');
+    }
+  });
 
   // Sync path with login/register view: /login -> Login, /register -> Register
   createEffect(() => {
@@ -66,7 +76,7 @@ function AppContent() {
   // When not logged in and on a protected path (e.g. /), redirect to /login
   createEffect(() => {
     if (checkingSetup() || needsSetup()) return;
-    if (user() || getUIDFromPath()) return;
+    if (user()) return;
     const p = path();
     if (p === '/' || p === '/admin' || p === '/profile') {
       navigate('/login');
@@ -112,119 +122,160 @@ function AppContent() {
 
       {/* Main app */}
       <Show when={!checkingSetup() && !needsSetup()}>
-        {/* Folder view - Google Drive style */}
-        <Show when={getUIDFromPath()}>
-          <Show when={isLoading()}>
-            <div class="min-h-screen bg-gray-900 flex items-center justify-center">
-              <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
-            </div>
-          </Show>
-          <Show when={!isLoading()}>
-            <Show when={user()} fallback={
-              <div class="min-h-screen bg-gray-900 flex items-center justify-center p-4">
-                <div class="bg-gray-800 rounded-xl p-6 text-center max-w-md">
-                  <h2 class="text-xl font-semibold text-white mb-2">Login Required</h2>
-                  <p class="text-gray-400 mb-4">Sign in to access this folder</p>
-                  <button
-                    onClick={() => navigate('/login')}
-                    class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg"
-                  >
-                    Go to Login
-                  </button>
-                </div>
-              </div>
-            }>
-              <FileViewer uid={getUIDFromPath()!} navigate={navigate} />
-            </Show>
-          </Show>
-        </Show>
-        
-        {/* Regular Routes - Show full drive UI */}
-        <Show when={!getUIDFromPath()}>
         <div class="min-h-screen bg-gray-900">
-      {/* Header */}
-      <header class="bg-gray-800 border-b border-gray-700">
-        <div class="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-4 flex items-center justify-between gap-2 flex-wrap">
-          <div 
-            class="flex items-center gap-2 sm:gap-3 cursor-pointer min-w-0 shrink-0"
-            onClick={() => navigate('/')}
-          >
-            <div class="w-9 h-9 sm:w-10 sm:h-10 bg-primary-600 rounded-lg flex items-center justify-center shrink-0">
-              <svg class="w-5 h-5 sm:w-6 sm:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-            </div>
-            <h1 class="text-lg sm:text-xl font-bold text-white truncate">SecureVault</h1>
-          </div>
-          
-          <Show when={user()}>
-            <div class="flex items-center gap-2 sm:gap-4 shrink-0">
-              {/* Admin link: icon-only on small screens */}
-              <Show when={user()?.isAdmin}>
-                <button
-                  onClick={() => navigate(isAdminPage() ? '/' : '/admin')}
-                  class={`p-2 sm:px-3 sm:py-1.5 rounded-lg text-sm flex items-center gap-2 touch-target sm:min-h-0 ${
-                    isAdminPage() 
-                      ? 'bg-primary-600 text-white' 
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                  title={isAdminPage() ? 'Exit Admin' : 'Admin'}
-                >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          {/* Header */}
+          <header class="bg-gray-800 border-b border-gray-700">
+            <div class="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-4 flex items-center justify-between gap-2 flex-wrap">
+              <div
+                class="flex items-center gap-2 sm:gap-3 cursor-pointer min-w-0 shrink-0"
+                onClick={() => {
+                  setDriveSection('drive');
+                  setGlobalSearch('');
+                  navigate('/');
+                }}
+              >
+                <div class="w-9 h-9 sm:w-10 sm:h-10 bg-primary-600 rounded-lg flex items-center justify-center shrink-0">
+                  <svg class="w-5 h-5 sm:w-6 sm:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                   </svg>
-                  <span class="hidden md:inline">{isAdminPage() ? 'Exit Admin' : 'Admin'}</span>
-                </button>
+                </div>
+                <h1 class="text-lg sm:text-xl font-bold text-white truncate">SecureVault</h1>
+              </div>
+
+              <Show when={user()}>
+                <Show when={!isAdminPage() && !isProfilePage()}>
+                  <div class="hidden md:flex flex-1 min-w-[240px] max-w-xl mx-2">
+                    <div class="relative w-full">
+                      <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                      <input
+                        type="text"
+                        placeholder="Search in SecureVault…"
+                        value={globalSearch()}
+                        onInput={(e) => setGlobalSearch(e.currentTarget.value)}
+                        class="w-full pl-10 pr-10 py-2 bg-gray-700/60 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      />
+                      <Show when={globalSearch()}>
+                        <button
+                          type="button"
+                          onClick={() => setGlobalSearch('')}
+                          class="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-white"
+                          title="Clear search"
+                        >
+                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </Show>
+                    </div>
+                  </div>
+                </Show>
+
+                <div class="flex items-center gap-2 sm:gap-4 shrink-0">
+                  {/* Admin link: icon-only on small screens */}
+                  <Show when={user()?.isAdmin}>
+                    <button
+                      onClick={() => navigate(isAdminPage() ? '/' : '/admin')}
+                      class={`p-2 sm:px-3 sm:py-1.5 rounded-lg text-sm flex items-center gap-2 touch-target sm:min-h-0 ${
+                        isAdminPage()
+                          ? 'bg-primary-600 text-white'
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      }`}
+                      title={isAdminPage() ? 'Exit Admin' : 'Admin'}
+                    >
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      <span class="hidden md:inline">{isAdminPage() ? 'Exit Admin' : 'Admin'}</span>
+                    </button>
+                  </Show>
+
+                  {/* Profile section (Discord-style) with dropdown */}
+                  <ProfileSection
+                    user={user()!}
+                    isProfilePage={isProfilePage()}
+                    onNavigate={navigate}
+                    onLogout={logout}
+                  />
+                </div>
               </Show>
-              
-              {/* Profile section (Discord-style) with dropdown */}
-              <ProfileSection
-                user={user()!}
-                isProfilePage={isProfilePage()}
-                onNavigate={navigate}
-                onLogout={logout}
-              />
             </div>
-          </Show>
-        </div>
-      </header>
+          </header>
 
-      {/* Main Content */}
-      <main class="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
-        <Show when={isLoading()}>
-          <div class="flex items-center justify-center h-64">
-            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
-          </div>
-        </Show>
+          {/* Main Content */}
+          <main class="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
+            <Show when={isLoading()}>
+              <div class="flex items-center justify-center h-64">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
+              </div>
+            </Show>
 
-        <Show when={!isLoading()}>
-          <Show when={user()} fallback={
-            <Show when={showRegister()} fallback={
-              <Login onSwitchToRegister={() => navigate('/register')} />
-            }>
-              <Register onSwitchToLogin={() => navigate('/login')} />
+            <Show when={!isLoading()}>
+              <Show
+                when={user()}
+                fallback={
+                  <Show when={showRegister()} fallback={<Login onSwitchToRegister={() => navigate('/register')} />}>
+                    <Register onSwitchToLogin={() => navigate('/login')} />
+                  </Show>
+                }
+              >
+                {/* Profile Page */}
+                <Show when={isProfilePage()}>
+                  <Profile onBack={() => navigate('/')} />
+                </Show>
+
+                {/* Admin Dashboard */}
+                <Show when={isAdminPage() && user()?.isAdmin && !isProfilePage()}>
+                  <AdminDashboard navigate={navigate} />
+                </Show>
+
+                {/* Drive shell (Sidebar + content) */}
+                <Show when={!isAdminPage() && !isProfilePage()}>
+                  <div class="flex gap-6">
+                    <Sidebar
+                      active={driveSection()}
+                      onNavigate={(section) => {
+                        setDriveSection(section);
+                        navigate('/');
+                      }}
+                    />
+                    <div class="flex-1 min-w-0">
+                      <Show
+                        when={driveSection() === 'home'}
+                        fallback={
+                          <Dashboard
+                            navigate={navigate}
+                            uid={getUIDFromPath()}
+                            section={driveSection() as any}
+                            onRequestNavigateRoot={() => navigate('/')}
+                            globalSearch={globalSearch()}
+                            onGlobalSearchChange={setGlobalSearch}
+                          />
+                        }
+                      >
+                        <Home
+                          search={globalSearch()}
+                          onOpenFolder={(id, name, uid) => {
+                            setDriveSection('drive');
+                            navigate(uid ? `/f/${uid}` : '/');
+                          }}
+                          onOpenFile={(file) => {
+                            setDriveSection('drive');
+                            // If file has a UID, deep link to it; Dashboard will open preview
+                            if ((file as any).uid) navigate(`/f/${(file as any).uid}`);
+                          }}
+                          onDownloadFile={() => {}}
+                        />
+                      </Show>
+                    </div>
+                  </div>
+                </Show>
+              </Show>
             </Show>
-          }>
-            {/* Profile Page */}
-            <Show when={isProfilePage()}>
-              <Profile onBack={() => navigate('/')} />
-            </Show>
-            
-            {/* Admin Dashboard */}
-            <Show when={isAdminPage() && user()?.isAdmin && !isProfilePage()}>
-              <AdminDashboard navigate={navigate} />
-            </Show>
-            
-            {/* User Dashboard (default) */}
-            <Show when={!isAdminPage() && !isProfilePage()}>
-              <Dashboard navigate={navigate} />
-            </Show>
-          </Show>
-        </Show>
-      </main>
+          </main>
         </div>
-        </Show>
       </Show>
     </>
   );
