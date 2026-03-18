@@ -6,6 +6,7 @@ import { saveFile, getFile, deleteFile, getStream, getStats } from '../lib/stora
 import { scanFile as virusTotalScan } from '../lib/virustotal.js';
 import { scanFile as malwareBazaarScan } from '../lib/malwarebazaar.js';
 import { generateUUID, generateUID } from '../lib/crypto.js';
+import { purgeTrashedOlderThanDays } from '../lib/trashRetention.js';
 import { z } from 'zod';
 import { logAudit } from './admin.js';
 import { getClientIp } from '../lib/clientIp.js';
@@ -472,6 +473,15 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   // ============ GET TRASH ============
   app.get('/api/trash', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
+
+    // Auto-purge items older than retention window.
+    await purgeTrashedOlderThanDays({
+      db,
+      schema,
+      deleteFile,
+      days: 30,
+      ownerId: user.id,
+    });
     
     const files = await db.query.files.findMany({
       where: and(
@@ -496,6 +506,15 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   // ============ EMPTY TRASH (Permanent Delete All) ============
   app.delete('/api/trash/empty', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
+
+    // Ensure expired items don't count toward the confirmation expectation
+    await purgeTrashedOlderThanDays({
+      db,
+      schema,
+      deleteFile,
+      days: 30,
+      ownerId: user.id,
+    });
 
     const trashed = await db.query.files.findMany({
       where: and(

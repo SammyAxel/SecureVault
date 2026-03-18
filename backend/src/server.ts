@@ -9,6 +9,9 @@ import { fileURLToPath } from 'url';
 import { readFile } from 'fs/promises';
 
 import { getClientIp } from './lib/clientIp.js';
+import { db, schema } from './db/index.js';
+import { deleteFile } from './lib/storage.js';
+import { purgeTrashedOlderThanDays } from './lib/trashRetention.js';
 import { authRoutes } from './routes/auth.js';
 import { fileRoutes } from './routes/files.js';
 import { shareRoutes } from './routes/share.js';
@@ -121,6 +124,31 @@ try {
   process.exit(1);
 }
 
+// ============ TRASH RETENTION ============
+const TRASH_RETENTION_DAYS = parseInt(process.env.TRASH_RETENTION_DAYS || '30', 10);
+const TRASH_PURGE_INTERVAL_HOURS = parseInt(process.env.TRASH_PURGE_INTERVAL_HOURS || '24', 10);
+
+async function purgeExpiredTrash() {
+  try {
+    const res = await purgeTrashedOlderThanDays({
+      db,
+      schema,
+      deleteFile,
+      days: TRASH_RETENTION_DAYS,
+    });
+    if (res.deletedCount > 0) {
+      console.log(
+        `🧹 Purged ${res.deletedCount} trashed item(s) older than ${TRASH_RETENTION_DAYS}d (reclaimed ${res.reclaimedBytes} bytes)`
+      );
+    }
+  } catch (err) {
+    console.error('❌ Trash retention purge failed:', err);
+  }
+}
+
+// Run once on startup (after migrations)
+await purgeExpiredTrash();
+
 // ============ START SERVER ============
 const PORT = parseInt(process.env.PORT || '3000');
 // In development, listen on localhost; in production, listen on all interfaces
@@ -129,6 +157,10 @@ const HOST = process.env.HOST || (isDev ? 'localhost' : '0.0.0.0');
 try {
   await app.listen({ port: PORT, host: HOST });
   console.log(`🚀 SecureVault API running on http://${HOST}:${PORT}`);
+
+  // Periodic trash purge
+  const intervalMs = Math.max(1, TRASH_PURGE_INTERVAL_HOURS) * 60 * 60 * 1000;
+  setInterval(purgeExpiredTrash, intervalMs).unref?.();
 } catch (err) {
   app.log.error(err);
   process.exit(1);
