@@ -1,4 +1,4 @@
-import { createSignal, createEffect, Show, For } from 'solid-js';
+import { createSignal, createEffect, Show, For, createMemo } from 'solid-js';
 import { useAuth } from '../stores/auth.jsx';
 import * as api from '../lib/api';
 import type { FileItem } from '../lib/api';
@@ -37,6 +37,11 @@ export default function FileViewer(props: FileViewerProps) {
   const [previewMimeType, setPreviewMimeType] = createSignal<string | null>(null);
   const [isDownloading, setIsDownloading] = createSignal(false);
   const [parentPath, setParentPath] = createSignal<Array<{ id: string; uid: string | null; name: string }>>([]);
+  const [viewMode, setViewMode] = createSignal<'grid' | 'list'>('grid');
+  const [filterType, setFilterType] = createSignal<'all' | 'folders' | 'files'>('all');
+  const [sortBy, setSortBy] = createSignal<'name' | 'type'>('name');
+  const [sortOrder, setSortOrder] = createSignal<'asc' | 'desc'>('asc');
+  const [openMenuId, setOpenMenuId] = createSignal<string | null>(null);
 
   // Load file/folder by UID
   const loadFileByUid = async (uid: string) => {
@@ -210,10 +215,24 @@ export default function FileViewer(props: FileViewerProps) {
     });
   };
 
-  const getFileIcon = (filename: string, isFolder: boolean) => {
+  // Filtered and sorted folder contents
+  const displayedItems = createMemo(() => {
+    const items = [...folderContents()];
+    let filtered = items;
+    if (filterType() === 'folders') filtered = items.filter((i) => i.isFolder);
+    else if (filterType() === 'files') filtered = items.filter((i) => !i.isFolder);
+    return [...filtered].sort((a, b) => {
+      const cmp = sortBy() === 'name'
+        ? a.filename.localeCompare(b.filename, undefined, { sensitivity: 'base' })
+        : ((a.isFolder ? 1 : 0) - (b.isFolder ? 1 : 0)) || a.filename.localeCompare(b.filename);
+      return sortOrder() === 'asc' ? cmp : -cmp;
+    });
+  });
+
+  const getFileIcon = (filename: string, isFolder: boolean, size = 'w-10 h-10') => {
     if (isFolder) {
       return (
-        <svg class="w-10 h-10 text-yellow-500" fill="currentColor" viewBox="0 0 20 20">
+        <svg class={`${size} text-yellow-500`} fill="currentColor" viewBox="0 0 20 20">
           <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
         </svg>
       );
@@ -223,13 +242,13 @@ export default function FileViewer(props: FileViewerProps) {
       pdf: 'text-red-500',
       doc: 'text-blue-500', docx: 'text-blue-500',
       xls: 'text-green-500', xlsx: 'text-green-500',
-      jpg: 'text-purple-500', jpeg: 'text-purple-500', png: 'text-purple-500', gif: 'text-purple-500',
+      jpg: 'text-red-500', jpeg: 'text-red-500', png: 'text-red-500', gif: 'text-red-500', webp: 'text-red-500',
       mp4: 'text-pink-500', mov: 'text-pink-500', webm: 'text-pink-500',
       mp3: 'text-orange-500', wav: 'text-orange-500',
       zip: 'text-yellow-600', rar: 'text-yellow-600',
     };
     return (
-      <svg class={`w-10 h-10 ${iconColors[ext] || 'text-gray-400'}`} fill="currentColor" viewBox="0 0 20 20">
+      <svg class={`${size} ${iconColors[ext] || 'text-gray-400'}`} fill="currentColor" viewBox="0 0 20 20">
         <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd" />
       </svg>
     );
@@ -373,80 +392,123 @@ export default function FileViewer(props: FileViewerProps) {
 
       {/* Content when not loading */}
       <Show when={!isLoading() && file()}>
-        {/* Folder view */}
+        {/* Folder view - Drive-style grid (personal) */}
         <Show when={file()?.isFolder}>
-          <div class="min-h-screen bg-gray-900">
+          <div class="min-h-screen bg-[#111111]">
             {/* Header */}
-            <header class="bg-gray-800 border-b border-gray-700">
-              <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-                <div class="flex items-center gap-4">
-                  {/* Back button - shows parent folder or home */}
+            <header class="sticky top-0 z-20 bg-[#111111] border-b border-gray-800">
+              <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+                <div class="flex items-center gap-2 min-w-0 flex-1">
                   <Show when={hasParentFolder()} fallback={
-                    <button
-                      onClick={goToDrive}
-                      class="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-700 transition-colors"
-                      title="Go to My Drive"
-                    >
-                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-                      </svg>
+                    <button onClick={goToDrive} class="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-full transition-colors shrink-0" title="My Drive">
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
                     </button>
                   }>
-                    <button
-                      onClick={goBack}
-                      class="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-700 transition-colors"
-                      title={`Back to ${parentPath()[parentPath().length - 1]?.name || 'folder'}`}
-                    >
-                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                      </svg>
+                    <button onClick={goBack} class="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-full transition-colors shrink-0" title="Back">
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
                     </button>
                   </Show>
-                  <div class="flex items-center gap-3">
-                    <svg class="w-8 h-8 text-yellow-500" fill="currentColor" viewBox="0 0 20 20">
-                      <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
-                    </svg>
-                    <div>
-                      <h1 class="text-lg font-semibold text-white">{file()?.filename}</h1>
-                      <p class="text-sm text-gray-400">{folderContents().length} items</p>
-                    </div>
+                  <div class="flex items-center gap-1 min-w-0 overflow-hidden">
+                    <button onClick={goToDrive} class="text-gray-400 hover:text-white text-sm truncate transition-colors">My Drive</button>
+                    <For each={parentPath()}>
+                      {(p) => (
+                        <>
+                          <svg class="w-4 h-4 text-gray-600 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" /></svg>
+                          <button onClick={() => p.uid && props.navigate(`/f/${p.uid}`)} class="text-gray-400 hover:text-white text-sm truncate max-w-[140px] sm:max-w-[180px] transition-colors">{p.name}</button>
+                        </>
+                      )}
+                    </For>
+                    <svg class="w-4 h-4 text-gray-600 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" /></svg>
+                    <span class="text-white font-medium text-sm truncate">{file()?.filename}</span>
                   </div>
                 </div>
-                <div class="text-sm text-gray-400">
-                  Logged in as <span class="text-white">{user()?.displayName || user()?.username}</span>
+                <div class="flex items-center gap-1 shrink-0">
+                  <button onClick={() => setViewMode('list')} class={`p-2 rounded-lg transition-colors ${viewMode() === 'list' ? 'bg-primary-600/20 text-primary-400' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`} title="List view">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
+                  </button>
+                  <button onClick={() => setViewMode('grid')} class={`p-2 rounded-lg transition-colors ${viewMode() === 'grid' ? 'bg-primary-600/20 text-primary-400' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`} title="Grid view">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+                  </button>
                 </div>
               </div>
             </header>
 
-            {/* Folder Contents */}
-            <main class="max-w-6xl mx-auto px-4 py-6">
-              <Show when={folderContents().length === 0}>
-                <div class="text-center py-16 text-gray-400">
-                  <svg class="w-16 h-16 mx-auto mb-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                  </svg>
-                  <p>This folder is empty</p>
+            {/* Filter toolbar */}
+            <div class="bg-[#111111] border-b border-gray-800">
+              <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
+                <select value={filterType()} onChange={(e) => setFilterType(e.target.value as any)} class="px-3 py-1.5 bg-[#1e1e1e] border border-gray-700 rounded-lg text-gray-300 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500">
+                  <option value="all">Type</option>
+                  <option value="folders">Folders</option>
+                  <option value="files">Files</option>
+                </select>
+                <div class="flex items-center gap-2 text-sm text-gray-400">
+                  <span>Name</span>
+                  <button onClick={() => setSortOrder(sortOrder() === 'asc' ? 'desc' : 'asc')} class="p-1 hover:text-white rounded transition-colors">
+                    <svg class={`w-4 h-4 ${sortOrder() === 'desc' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" /></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Content */}
+            <main class="max-w-7xl mx-auto px-4 py-6">
+              <Show when={displayedItems().length === 0}>
+                <div class="flex flex-col items-center justify-center py-24 text-gray-500">
+                  <div class="w-20 h-20 rounded-2xl bg-[#1e1e1e] flex items-center justify-center mb-4">
+                    <svg class="w-10 h-10 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                  </div>
+                  <p class="text-base">This folder is empty</p>
                 </div>
               </Show>
-              
-              <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                <For each={folderContents()}>
-                  {(item) => (
-                    <div
-                      onClick={() => openItem(item)}
-                      class="bg-gray-800 rounded-xl p-4 cursor-pointer hover:bg-gray-750 hover:ring-2 hover:ring-primary-500/50 transition-all group"
-                    >
-                      <div class="flex flex-col items-center text-center">
-                        {getFileIcon(item.filename, item.isFolder)}
-                        <p class="mt-3 text-sm text-white truncate w-full">{item.filename}</p>
-                        <p class="text-xs text-gray-500 mt-1">
-                          {item.isFolder ? 'Folder' : formatSize(item.fileSize)}
-                        </p>
+
+              <Show when={displayedItems().length > 0 && viewMode() === 'grid'}>
+                <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-4">
+                  <For each={displayedItems()}>
+                    {(item) => (
+                      <div
+                        onClick={() => openItem(item)}
+                        class="group flex flex-col rounded-xl bg-[#1e1e1e] overflow-hidden cursor-pointer hover:ring-1 hover:ring-gray-600 transition-all"
+                      >
+                        {/* Card header: icon + name + menu */}
+                        <div class="flex items-center gap-2 px-3 py-2 min-h-0">
+                          <div class="w-6 h-6 flex items-center justify-center shrink-0 overflow-hidden">
+                            {getFileIcon(item.filename, item.isFolder, 'w-5 h-5')}
+                          </div>
+                          <p class="flex-1 text-sm text-white truncate min-w-0">{item.filename}</p>
+                          <button onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId() === item.id ? null : item.id); }} class="p-1 text-gray-400 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" /></svg>
+                          </button>
+                        </div>
+                        {/* Large preview area */}
+                        <div class="aspect-square bg-[#2a2a2a] flex items-center justify-center p-4">
+                          <div class="w-full h-full flex items-center justify-center rounded-lg bg-gray-800/50">
+                            {getFileIcon(item.filename, item.isFolder)}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </For>
-              </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
+
+              <Show when={displayedItems().length > 0 && viewMode() === 'list'}>
+                <div class="space-y-0.5">
+                  <For each={displayedItems()}>
+                    {(item) => (
+                      <div
+                        onClick={() => openItem(item)}
+                        class="flex items-center gap-4 px-4 py-3 rounded-xl hover:bg-[#1e1e1e] cursor-pointer transition-colors"
+                      >
+                        <div class="w-10 h-10 flex items-center justify-center shrink-0">{getFileIcon(item.filename, item.isFolder)}</div>
+                        <div class="flex-1 min-w-0">
+                          <p class="text-white truncate">{item.filename}</p>
+                          <p class="text-gray-500 text-sm">{item.isFolder ? 'Folder' : formatSize(item.fileSize)}</p>
+                        </div>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
             </main>
           </div>
         </Show>

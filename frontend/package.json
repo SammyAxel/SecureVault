@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "cropperjs": "^1.6.2",
     "mammoth": "^1.6.0",
     "solid-js": "^1.8.11",
     "ua-parser-js": "^1.0.37",

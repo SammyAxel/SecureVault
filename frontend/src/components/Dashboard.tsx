@@ -176,24 +176,19 @@ export default function Dashboard(props: DashboardProps) {
     return () => document.removeEventListener('click', handleClickOutside);
   });
 
-  // Navigate to folder (in dashboard, use FileViewer for UID-based navigation)
+  // Navigate to folder (Google Drive style)
   const navigateToFolder = (folderId: string | null, folderName: string, folderUid?: string | null) => {
     if (folderId === null) {
       setFolderPath([{ id: null, uid: null, name: 'My Files' }]);
       setCurrentFolderUid(null);
-      // Update URL to root
-      if (props.navigate) {
-        window.history.replaceState({}, '', '/');
-      }
+      setCurrentFolder(null);
+      if (props.navigate) props.navigate('/');
     } else {
       setFolderPath([...folderPath(), { id: folderId, uid: folderUid || null, name: folderName }]);
       setCurrentFolderUid(folderUid || null);
-      // Update URL with folder UID
-      if (props.navigate && folderUid) {
-        window.history.replaceState({}, '', `/f/${folderUid}`);
-      }
+      setCurrentFolder(folderId);
+      if (props.navigate && folderUid) props.navigate(`/f/${folderUid}`);
     }
-    setCurrentFolder(folderId);
   };
 
   const navigateUp = (index: number) => {
@@ -202,13 +197,10 @@ export default function Dashboard(props: DashboardProps) {
     const lastItem = newPath[newPath.length - 1];
     setCurrentFolder(lastItem.id);
     setCurrentFolderUid(lastItem.uid);
-    // Update URL
+    // Update URL so App switches to FileViewer when needed
     if (props.navigate) {
-      if (lastItem.uid) {
-        window.history.replaceState({}, '', `/f/${lastItem.uid}`);
-      } else {
-        window.history.replaceState({}, '', '/');
-      }
+      if (lastItem.uid) props.navigate(`/f/${lastItem.uid}`);
+      else props.navigate('/');
     }
   };
 

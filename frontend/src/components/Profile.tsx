@@ -3,6 +3,7 @@ import { useAuth } from '../stores/auth';
 import * as api from '../lib/api';
 import { toast } from '../stores/toast';
 import { openConfirm } from '../stores/confirm';
+import { AvatarCropper } from './AvatarCropper';
 import {
   generateKeyBundle,
   downloadKeyBundle,
@@ -124,6 +125,7 @@ function GeneralTab() {
   const [displayName, setDisplayName] = createSignal(user()?.displayName || '');
   const [avatar, setAvatar] = createSignal(user()?.avatar || '');
   const [isLoading, setIsLoading] = createSignal(false);
+  const [imageToCrop, setImageToCrop] = createSignal<string | null>(null);
 
   const handleAvatarChange = async (e: Event) => {
     const input = e.target as HTMLInputElement;
@@ -136,17 +138,32 @@ function GeneralTab() {
       return;
     }
 
-    if (file.size > 500 * 1024) {
-      toast.error('Image too large (max 500KB)');
+    // Allow larger files for cropping (we'll compress output to 500KB)
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('Image too large (max 10MB)');
       return;
     }
 
-    // Convert to base64
+    // Convert to base64 and open cropper
     const reader = new FileReader();
     reader.onload = () => {
-      setAvatar(reader.result as string);
+      setImageToCrop(reader.result as string);
     };
     reader.readAsDataURL(file);
+    input.value = ''; // Reset so same file can be selected again
+  };
+
+  const handleCropSave = (croppedDataUrl: string) => {
+    if (croppedDataUrl.length > 500 * 1024) {
+      toast.error('Cropped image too large. Try a smaller or simpler image.');
+      return;
+    }
+    setAvatar(croppedDataUrl);
+    setImageToCrop(null);
+  };
+
+  const handleCropCancel = () => {
+    setImageToCrop(null);
   };
 
   const removeAvatar = () => {
@@ -190,6 +207,14 @@ function GeneralTab() {
 
   return (
     <div class="space-y-6">
+      <Show when={imageToCrop()}>
+        <AvatarCropper
+          imageSrc={imageToCrop()!}
+          onSave={handleCropSave}
+          onCancel={handleCropCancel}
+        />
+      </Show>
+
       {/* Avatar Section */}
       <div class="bg-gray-800 rounded-xl p-6">
         <h3 class="text-lg font-semibold mb-4">Profile Picture</h3>
@@ -225,7 +250,7 @@ function GeneralTab() {
                 Remove
               </button>
             </Show>
-            <p class="text-gray-500 text-xs">Max 500KB, JPG/PNG/GIF</p>
+            <p class="text-gray-500 text-xs">Max 10MB. You can adjust the crop before saving.</p>
           </div>
         </div>
       </div>

@@ -42,8 +42,8 @@ function AppContent() {
   
   // Check if we're on profile page
   const isProfilePage = () => path() === '/profile';
-  
-  // Extract UID from /f/:uid path
+
+  // Extract UID from /f/:uid path (folder view)
   const getUIDFromPath = () => {
     const match = path().match(/^\/f\/([a-zA-Z0-9-]+)/);
     return match ? match[1] : null;
@@ -112,7 +112,7 @@ function AppContent() {
 
       {/* Main app */}
       <Show when={!checkingSetup() && !needsSetup()}>
-        {/* UID Route - Show dedicated file viewer */}
+        {/* Folder view - Google Drive style */}
         <Show when={getUIDFromPath()}>
           <Show when={isLoading()}>
             <div class="min-h-screen bg-gray-900 flex items-center justify-center">
@@ -121,7 +121,18 @@ function AppContent() {
           </Show>
           <Show when={!isLoading()}>
             <Show when={user()} fallback={
-              <UIDAccessDenied navigate={navigate} />
+              <div class="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+                <div class="bg-gray-800 rounded-xl p-6 text-center max-w-md">
+                  <h2 class="text-xl font-semibold text-white mb-2">Login Required</h2>
+                  <p class="text-gray-400 mb-4">Sign in to access this folder</p>
+                  <button
+                    onClick={() => navigate('/login')}
+                    class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg"
+                  >
+                    Go to Login
+                  </button>
+                </div>
+              </div>
             }>
               <FileViewer uid={getUIDFromPath()!} navigate={navigate} />
             </Show>
@@ -340,35 +351,6 @@ function ProfileSection(props: {
           </div>
         </div>
       </Show>
-    </div>
-  );
-}
-
-// Component shown when user is not logged in but tries to access a UID link
-function UIDAccessDenied(props: { navigate: (path: string) => void }) {
-  const [showLogin, setShowLogin] = createSignal(true);
-  
-  return (
-    <div class="min-h-screen bg-gray-900 flex items-center justify-center p-4">
-      <div class="bg-gray-800 rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
-        <div class="bg-gradient-to-r from-primary-600 to-primary-700 px-6 py-4 text-center">
-          <div class="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3">
-            <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
-          </div>
-          <h1 class="text-xl font-bold text-white">Login Required</h1>
-          <p class="text-primary-100 text-sm mt-1">Sign in to access this file</p>
-        </div>
-        
-        <div class="p-6">
-          <Show when={showLogin()} fallback={
-            <Register onSwitchToLogin={() => setShowLogin(true)} />
-          }>
-            <Login onSwitchToRegister={() => setShowLogin(false)} />
-          </Show>
-        </div>
-      </div>
     </div>
   );
 }

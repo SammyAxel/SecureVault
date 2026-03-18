@@ -121,3 +121,13 @@ input[type="checkbox"] {
 .animate-dropdown-out {
   animation: dropdown-out 0.2s ease-out forwards;
 }
+
+/* Avatar cropper: circular crop preview */
+.avatar-cropper-area .cropper-view-box,
+.avatar-cropper-area .cropper-crop-box {
+  border-radius: 50% !important;
+}
+
+.avatar-cropper-area .cropper-face {
+  border-radius: 50%;
+}
