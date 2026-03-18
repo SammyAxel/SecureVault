@@ -24,6 +24,21 @@ const moveSchema = z.object({
 });
 
 export async function fileRoutes(app: FastifyInstance): Promise<void> {
+  // Helper: recursively collect all descendants (files + folders)
+  const getAllChildFiles = async (parentId: string): Promise<typeof schema.files.$inferSelect[]> => {
+    const children = await db.query.files.findMany({
+      where: eq(schema.files.parentId, parentId),
+    });
+    
+    let allFiles: typeof schema.files.$inferSelect[] = [...children];
+    for (const child of children) {
+      if (child.isFolder) {
+        const subChildren = await getAllChildFiles(child.id);
+        allFiles = [...allFiles, ...subChildren];
+      }
+    }
+    return allFiles;
+  };
   
   // ============ LIST FILES ============
   app.get('/api/files', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
@@ -335,6 +350,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   app.delete('/api/files/:fileId', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
     const { fileId } = request.params as { fileId: string };
+    const { permanent } = request.query as { permanent?: string };
+    const isPermanent = permanent === 'true';
     
     const file = await db.query.files.findFirst({
       where: and(
@@ -346,72 +363,67 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     if (!file) {
       return reply.status(404).send({ ok: false, msg: 'File not found' });
     }
-    
-    // Calculate total size to reclaim (including all children if it's a folder)
-    let totalSizeToReclaim = 0;
-    
-    if (file.isFolder) {
-      // Get all files recursively in this folder
-      const getAllChildFiles = async (parentId: string): Promise<typeof schema.files.$inferSelect[]> => {
-        const children = await db.query.files.findMany({
-          where: eq(schema.files.parentId, parentId),
-        });
-        
-        let allFiles: typeof schema.files.$inferSelect[] = [...children];
-        for (const child of children) {
-          if (child.isFolder) {
-            const subChildren = await getAllChildFiles(child.id);
-            allFiles = [...allFiles, ...subChildren];
-          }
-        }
-        return allFiles;
-      };
+
+    // Default behavior: move to trash (soft delete)
+    if (!isPermanent) {
+      const now = new Date();
+      const descendants = file.isFolder ? await getAllChildFiles(file.id) : [];
+      const toTrash = [file, ...descendants];
       
-      const allChildren = await getAllChildFiles(file.id);
-      totalSizeToReclaim = allChildren.reduce((sum, f) => sum + (f.fileSize || 0), 0);
-      
-      // Delete physical files for all children
-      for (const childFile of allChildren) {
-        if (childFile.storagePath) {
-          const deleted = await deleteFile(childFile.storagePath);
-          if (!deleted) {
-            console.warn(`Failed to delete physical file: ${childFile.storagePath}`);
-          }
-        }
+      for (const f of toTrash) {
+        await db.update(schema.files)
+          .set({ isDeleted: true, deletedAt: now })
+          .where(and(
+            eq(schema.files.id, f.id),
+            eq(schema.files.ownerId, user.id)
+          ));
       }
-    } else {
-      totalSizeToReclaim = file.fileSize || 0;
+
+      await logAudit(
+        user.id,
+        user.username,
+        'MOVE_TO_TRASH',
+        file.isFolder ? 'FOLDER' : 'FILE',
+        fileId,
+        { filename: file.filename },
+        getClientIp(request),
+        request.headers['user-agent']
+      );
       
-      // Delete physical file
-      if (file.storagePath) {
-        const deleted = await deleteFile(file.storagePath);
-        if (!deleted) {
-          console.warn(`Failed to delete physical file: ${file.storagePath}`);
-        }
+      return { ok: true, trashed: true };
+    }
+
+    // Permanent delete: remove blobs + rows and reclaim storage
+    let totalSizeToReclaim = 0;
+    const descendants = file.isFolder ? await getAllChildFiles(file.id) : [];
+    const toDelete = [file, ...descendants];
+    totalSizeToReclaim = toDelete.reduce((sum, f) => sum + (f.fileSize || 0), 0);
+
+    for (const f of toDelete) {
+      if (f.storagePath) {
+        const deleted = await deleteFile(f.storagePath);
+        if (!deleted) console.warn(`Failed to delete physical file: ${f.storagePath}`);
       }
     }
-    
-    // Delete from database (CASCADE will handle children)
+
     await db.delete(schema.files).where(eq(schema.files.id, fileId));
-    
-    // Update storage quota
+
     await db.update(schema.users)
       .set({ storageUsed: Math.max(0, user.storageUsed! - totalSizeToReclaim) })
       .where(eq(schema.users.id, user.id));
-    
-    // Log audit
+
     await logAudit(
       user.id,
       user.username,
-      'DELETE',
+      'DELETE_PERMANENT',
       file.isFolder ? 'FOLDER' : 'FILE',
       fileId,
       { filename: file.filename, fileSize: totalSizeToReclaim },
       getClientIp(request),
       request.headers['user-agent']
     );
-    
-    return { ok: true };
+
+    return { ok: true, deleted: true };
   });
   
   // ============ RESTORE FILE ============
@@ -430,10 +442,29 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     if (!file) {
       return reply.status(404).send({ ok: false, msg: 'File not found in trash' });
     }
-    
-    await db.update(schema.files)
-      .set({ isDeleted: false, deletedAt: null })
-      .where(eq(schema.files.id, fileId));
+
+    const descendants = file.isFolder ? await getAllChildFiles(file.id) : [];
+    const toRestore = [file, ...descendants];
+
+    for (const f of toRestore) {
+      await db.update(schema.files)
+        .set({ isDeleted: false, deletedAt: null })
+        .where(and(
+          eq(schema.files.id, f.id),
+          eq(schema.files.ownerId, user.id)
+        ));
+    }
+
+    await logAudit(
+      user.id,
+      user.username,
+      'RESTORE_FROM_TRASH',
+      file.isFolder ? 'FOLDER' : 'FILE',
+      fileId,
+      { filename: file.filename },
+      getClientIp(request),
+      request.headers['user-agent']
+    );
     
     return { ok: true };
   });
@@ -460,6 +491,56 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         deletedAt: f.deletedAt,
       })),
     };
+  });
+
+  // ============ EMPTY TRASH (Permanent Delete All) ============
+  app.delete('/api/trash/empty', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+    const user = request.user!;
+
+    const trashed = await db.query.files.findMany({
+      where: and(
+        eq(schema.files.ownerId, user.id),
+        eq(schema.files.isDeleted, true)
+      ),
+    });
+
+    if (trashed.length === 0) {
+      return { ok: true, deletedCount: 0 };
+    }
+
+    // Delete physical blobs for all trashed items that have a storagePath
+    for (const f of trashed) {
+      if (f.storagePath) {
+        const deleted = await deleteFile(f.storagePath);
+        if (!deleted) console.warn(`Failed to delete physical file: ${f.storagePath}`);
+      }
+    }
+
+    const totalSizeToReclaim = trashed.reduce((sum, f) => sum + (f.fileSize || 0), 0);
+
+    // Delete all trashed rows for this user (child rows are included since they are individually marked deleted too)
+    await db.delete(schema.files).where(and(
+      eq(schema.files.ownerId, user.id),
+      eq(schema.files.isDeleted, true)
+    ));
+
+    // Update storage used
+    await db.update(schema.users)
+      .set({ storageUsed: Math.max(0, user.storageUsed! - totalSizeToReclaim) })
+      .where(eq(schema.users.id, user.id));
+
+    await logAudit(
+      user.id,
+      user.username,
+      'EMPTY_TRASH',
+      'USER',
+      user.id.toString(),
+      { deletedCount: trashed.length, fileSize: totalSizeToReclaim },
+      getClientIp(request),
+      request.headers['user-agent']
+    );
+
+    return { ok: true, deletedCount: trashed.length };
   });
 
   // ============ RENAME FILE/FOLDER ============

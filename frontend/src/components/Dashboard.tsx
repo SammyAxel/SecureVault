@@ -503,19 +503,76 @@ export default function Dashboard(props: DashboardProps) {
   const handleDelete = async (file: FileItem) => {
     const confirmed = await openConfirm({
       title: 'Delete File',
-      message: `Permanently delete "${file.filename}"? This cannot be undone.`,
-      confirmText: 'Delete',
+      message: `Move "${file.filename}" to Trash? You can restore it later from Trash.`,
+      confirmText: 'Move to Trash',
       type: 'danger',
     });
     if (!confirmed) return;
 
     try {
       await api.deleteFile(file.id);
-      toast.success(`"${file.filename}" deleted successfully`);
+      toast.success(`Moved "${file.filename}" to Trash`);
       loadFiles();
       await refreshStorage();
     } catch (error: any) {
       toast.error(`Failed to delete: ${error.message}`);
+    }
+  };
+
+  const handleRestore = async (file: FileItem) => {
+    const confirmed = await openConfirm({
+      title: 'Restore item?',
+      message: `Restore "${file.filename}" back to My Drive?`,
+      confirmText: 'Restore',
+      type: 'info',
+    });
+    if (!confirmed) return;
+
+    try {
+      await api.restoreFile(file.id);
+      toast.success(`Restored "${file.filename}"`);
+      loadFiles();
+    } catch (error: any) {
+      toast.error(`Failed to restore: ${error.message}`);
+    }
+  };
+
+  const handlePermanentDelete = async (file: FileItem) => {
+    const confirmed = await openConfirm({
+      title: 'Delete permanently?',
+      message: `Permanently delete "${file.filename}"? This cannot be undone.`,
+      confirmText: 'Delete permanently',
+      type: 'danger',
+    });
+    if (!confirmed) return;
+
+    try {
+      await api.deleteFile(file.id, true);
+      toast.success(`Deleted "${file.filename}" permanently`);
+      loadFiles();
+      await refreshStorage();
+    } catch (error: any) {
+      toast.error(`Failed to delete permanently: ${error.message}`);
+    }
+  };
+
+  const handleEmptyTrash = async () => {
+    const confirmed = await openConfirm({
+      title: 'Empty Trash?',
+      message: 'Permanently delete everything in Trash? This cannot be undone.',
+      confirmText: 'Empty Trash',
+      type: 'danger',
+    });
+    if (!confirmed) return;
+
+    try {
+      const res = await api.emptyTrash();
+      toast.success(`Trash emptied (${res.deletedCount} item(s) deleted)`);
+      clearSelection();
+      loadFiles();
+      await refreshStorage();
+    } catch (error: any) {
+      toast.error(`Failed to empty trash: ${error.message}`);
     }
   };
 
@@ -621,8 +678,11 @@ export default function Dashboard(props: DashboardProps) {
 
     const confirmed = await openConfirm({
       title: 'Delete Multiple Files',
-      message: `Permanently delete ${selected.size} item(s)? This cannot be undone.`,
-      confirmText: 'Delete All',
+      message:
+        section() === 'trash'
+          ? `Permanently delete ${selected.size} item(s)? This cannot be undone.`
+          : `Move ${selected.size} item(s) to Trash? You can restore them later from Trash.`,
+      confirmText: section() === 'trash' ? 'Delete Permanently' : 'Move to Trash',
       type: 'danger',
     });
     if (!confirmed) return;
@@ -632,7 +692,7 @@ export default function Dashboard(props: DashboardProps) {
 
     for (const fileId of selected) {
       try {
-        await api.deleteFile(fileId);
+        await api.deleteFile(fileId, section() === 'trash');
         successCount++;
       } catch (error) {
         failCount++;
@@ -640,12 +700,47 @@ export default function Dashboard(props: DashboardProps) {
     }
 
     if (successCount > 0) {
-      toast.success(`${successCount} item(s) deleted successfully`);
-      await refreshStorage();
+      toast.success(
+        section() === 'trash'
+          ? `${successCount} item(s) deleted permanently`
+          : `${successCount} item(s) moved to Trash`
+      );
+      if (section() !== 'shared') await refreshStorage();
     }
     if (failCount > 0) {
       toast.error(`Failed to delete ${failCount} item(s)`);
     }
+
+    clearSelection();
+    loadFiles();
+  };
+
+  const handleBulkRestore = async () => {
+    const selected = selectedFiles();
+    if (selected.size === 0) return;
+
+    const confirmed = await openConfirm({
+      title: 'Restore multiple items?',
+      message: `Restore ${selected.size} item(s) back to My Drive?`,
+      confirmText: 'Restore',
+      type: 'info',
+    });
+    if (!confirmed) return;
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const fileId of selected) {
+      try {
+        await api.restoreFile(fileId);
+        successCount++;
+      } catch (_) {
+        failCount++;
+      }
+    }
+
+    if (successCount > 0) toast.success(`${successCount} item(s) restored`);
+    if (failCount > 0) toast.error(`Failed to restore ${failCount} item(s)`);
 
     clearSelection();
     loadFiles();
@@ -844,6 +939,19 @@ export default function Dashboard(props: DashboardProps) {
               />
             </label>
           </Show>
+
+          <Show when={section() === 'trash' && files().length > 0}>
+            <button
+              onClick={handleEmptyTrash}
+              class="px-3 py-2 sm:px-4 bg-red-600/90 hover:bg-red-600 rounded-lg text-sm flex items-center gap-2 text-white touch-target sm:min-h-0"
+              title="Empty Trash"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              <span class="hidden sm:inline">Empty Trash</span>
+            </button>
+          </Show>
         </div>
       </div>
 
@@ -915,15 +1023,30 @@ export default function Dashboard(props: DashboardProps) {
             </button>
           </div>
           <div class="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={openBulkMove}
-              class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm flex items-center gap-2 text-white"
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-              </svg>
-              Move
-            </button>
+            <Show when={section() === 'drive'}>
+              <button
+                onClick={openBulkMove}
+                class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm flex items-center gap-2 text-white"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+                </svg>
+                Move
+              </button>
+            </Show>
+
+            <Show when={section() === 'trash'}>
+              <button
+                onClick={handleBulkRestore}
+                class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 rounded-lg text-sm flex items-center gap-2 text-white"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a10 10 0 00-9.95 9H4zm16 0a8 8 0 01-8 8v-4l-3 3 3 3v-4a10 10 0 009.95-9H20z" />
+                </svg>
+                Restore
+              </button>
+            </Show>
+
             <button
               onClick={handleBulkDelete}
               class="px-3 py-1.5 bg-red-600 hover:bg-red-700 rounded-lg text-sm flex items-center gap-2 text-white"
@@ -931,7 +1054,7 @@ export default function Dashboard(props: DashboardProps) {
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
               </svg>
-              Delete
+              {section() === 'trash' ? 'Delete permanently' : 'Move to Trash'}
             </button>
           </div>
         </div>
@@ -1167,6 +1290,30 @@ export default function Dashboard(props: DashboardProps) {
                   Open/Preview
                 </button>
               )}
+
+              {section() === 'trash' && (
+                <>
+                  <button
+                    onClick={() => { handleRestore(file); setOpenMenuId(null); setMenuPosition(null); }}
+                    class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2 rounded-t-lg"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a10 10 0 00-9.95 9H4zm16 0a8 8 0 01-8 8v-4l-3 3 3 3v-4a10 10 0 009.95-9H20z" />
+                    </svg>
+                    Restore
+                  </button>
+                  <button
+                    onClick={() => { handlePermanentDelete(file); setOpenMenuId(null); setMenuPosition(null); }}
+                    class="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-gray-700 flex items-center gap-2 rounded-b-lg"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Delete permanently
+                  </button>
+                </>
+              )}
+
               <Show when={section() === 'drive'}>
                 <button
                   onClick={() => { openRenameModal(file); setOpenMenuId(null); setMenuPosition(null); }}

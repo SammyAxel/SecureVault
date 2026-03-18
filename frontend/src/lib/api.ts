@@ -333,6 +333,12 @@ export async function getTrash() {
   }>('/trash');
 }
 
+export async function emptyTrash() {
+  return request<{ ok: boolean; deletedCount: number }>(`/trash/empty`, {
+    method: 'DELETE',
+  });
+}
+
 // ============ SHARING ============
 
 export async function shareWithUser(
