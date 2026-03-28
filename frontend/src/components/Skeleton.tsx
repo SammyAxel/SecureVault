@@ -1,3 +1,5 @@
+import { For } from 'solid-js';
+
 export function SkeletonText(props: { width?: string; height?: string }) {
   return (
     <div 
@@ -62,9 +64,7 @@ export function SkeletonDashboard() {
           <div class="h-4 w-16 animate-pulse bg-gray-600 rounded" />
         </div>
         <div class="divide-y divide-gray-800">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <SkeletonFileRow key={i} />
-          ))}
+          <For each={[0, 1, 2, 3, 4, 5, 6, 7]}>{() => <SkeletonFileRow />}</For>
         </div>
       </div>
     </div>

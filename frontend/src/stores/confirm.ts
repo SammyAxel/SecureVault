@@ -5,7 +5,10 @@ export interface ConfirmOptions {
   message: string;
   confirmText?: string;
   cancelText?: string;
-  type?: 'danger' | 'warning';
+  /** Visual severity; drives default icon and confirm button styling unless `confirmButtonClass` is set. */
+  type?: 'danger' | 'warning' | 'info';
+  /** Optional Tailwind classes for the confirm button (overrides default type-based styles). */
+  confirmButtonClass?: string;
   onConfirm?: () => void;
   onCancel?: () => void;
 }

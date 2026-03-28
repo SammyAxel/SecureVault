@@ -9,6 +9,7 @@ import {
   type KeyBundle,
 } from '../lib/crypto';
 import { getFullDeviceInfo } from '../lib/deviceFingerprint';
+import { awaitMinElapsed, MIN_FORM_SUBMIT_MS } from '../lib/motion';
 
 interface LoginProps {
   onSwitchToRegister: () => void;
@@ -46,6 +47,7 @@ export default function Login(props: LoginProps) {
   const handleLogin = async (e: Event) => {
     e.preventDefault();
     setError('');
+    const opStart = Date.now();
     setIsLoading(true);
 
     try {
@@ -59,6 +61,7 @@ export default function Login(props: LoginProps) {
       setChallengeData({ challenge, challengeId });
 
       if (needs2FA && !totp()) {
+        await awaitMinElapsed(opStart, MIN_FORM_SUBMIT_MS);
         setIsLoading(false);
         return; // Wait for 2FA code
       }
@@ -66,11 +69,13 @@ export default function Login(props: LoginProps) {
       await completeLogin(challenge, challengeId);
     } catch (err: any) {
       setError(err.message || 'Login failed');
+      await awaitMinElapsed(opStart, MIN_FORM_SUBMIT_MS);
       setIsLoading(false);
     }
   };
 
   const completeLogin = async (challenge: string, challengeId: string) => {
+    const opStart = Date.now();
     try {
       // Load keys from file
       const keys = keyBundle();
@@ -109,6 +114,7 @@ export default function Login(props: LoginProps) {
     } catch (err: any) {
       setError(err.message || 'Login failed');
     } finally {
+      await awaitMinElapsed(opStart, MIN_FORM_SUBMIT_MS);
       setIsLoading(false);
     }
   };
@@ -123,7 +129,7 @@ export default function Login(props: LoginProps) {
 
   return (
     <div class="max-w-md mx-auto mt-8 sm:mt-16 px-3 sm:px-0">
-      <div class="bg-gray-800 rounded-xl p-4 sm:p-8 shadow-xl">
+      <div class="bg-gray-800 rounded-xl p-4 sm:p-8 shadow-xl animate-sv-rise">
         <h2 class="text-xl sm:text-2xl font-bold text-center mb-6">Welcome Back</h2>
         
         {error() && (

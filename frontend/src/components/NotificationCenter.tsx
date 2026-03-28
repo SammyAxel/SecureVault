@@ -1,6 +1,7 @@
 import { createSignal, createEffect, For, Show, onCleanup } from 'solid-js';
 import * as api from '../lib/api';
 import { toast } from '../stores/toast';
+import { awaitMinElapsed, MIN_CONTENT_LOAD_MS, MIN_SILENT_REFRESH_MS } from '../lib/motion';
 
 export default function NotificationCenter() {
   const [notifications, setNotifications] = createSignal<api.NotificationItem[]>([]);
@@ -11,6 +12,8 @@ export default function NotificationCenter() {
 
   // Load notifications
   const loadNotifications = async () => {
+    const started = Date.now();
+    const minMs = isOpen() ? MIN_CONTENT_LOAD_MS : MIN_SILENT_REFRESH_MS;
     try {
       setIsLoading(true);
       const result = await api.getNotifications();
@@ -31,15 +34,27 @@ export default function NotificationCenter() {
     } catch (err) {
       console.error('Failed to load notifications:', err);
     } finally {
+      await awaitMinElapsed(started, minMs);
       setIsLoading(false);
     }
   };
 
-  // Poll every 30 seconds
+  // Poll every 30s while tab is visible; refresh when user returns to the tab
   createEffect(() => {
-    loadNotifications();
-    const interval = setInterval(loadNotifications, 30000);
-    onCleanup(() => clearInterval(interval));
+    const tick = () => {
+      if (document.visibilityState === 'hidden') return;
+      loadNotifications();
+    };
+    tick();
+    const interval = setInterval(tick, 30000);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') loadNotifications();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    onCleanup(() => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    });
   });
 
   // Mark as read
@@ -131,7 +146,7 @@ export default function NotificationCenter() {
 
       {/* Dropdown Panel */}
       <Show when={isOpen()}>
-        <div class="absolute right-0 mt-2 w-96 max-w-[calc(100vw-1.5rem)] bg-gray-800 rounded-lg shadow-xl border border-gray-700 z-50 max-h-[70vh] sm:max-h-[600px] flex flex-col">
+        <div class="absolute right-0 mt-2 w-96 max-w-[calc(100vw-1.5rem)] bg-gray-800 rounded-lg shadow-xl border border-gray-700 z-50 max-h-[70vh] sm:max-h-[600px] flex flex-col animate-dropdown-in">
           {/* Header */}
           <div class="flex items-center justify-between p-4 border-b border-gray-700">
             <h3 class="text-lg font-semibold text-white">Notifications</h3>
@@ -229,7 +244,7 @@ export default function NotificationCenter() {
       {/* Close on outside click */}
       <Show when={isOpen()}>
         <div
-          class="fixed inset-0 z-40"
+          class="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px] sv-modal-overlay"
           onClick={() => setIsOpen(false)}
         />
       </Show>

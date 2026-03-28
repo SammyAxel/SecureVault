@@ -1,5 +1,6 @@
 import { createContext, createSignal, useContext, ParentComponent, onMount, onCleanup } from 'solid-js';
 import { clearCurrentKeys } from '../lib/crypto';
+import { awaitMinElapsed, MIN_BOOTSTRAP_MS } from '../lib/motion';
 import { toast } from './toast';
 
 export interface User {
@@ -28,6 +29,8 @@ const AuthContext = createContext<AuthContextValue>();
 
 // Inactivity timeout: 15 minutes
 const INACTIVITY_TIMEOUT = 15 * 60 * 1000;
+/** mousemove fires very often; only reset the idle timer at this interval */
+const MOUSEMOVE_THROTTLE_MS = 2000;
 
 export const AuthProvider: ParentComponent = (props) => {
   const [user, setUser] = createSignal<User | null>(null);
@@ -35,6 +38,7 @@ export const AuthProvider: ParentComponent = (props) => {
   const [isLoading, setIsLoading] = createSignal(true);
   
   let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastMousemoveReset = 0;
 
   // Reset the inactivity timer
   const resetInactivityTimer = () => {
@@ -53,14 +57,22 @@ export const AuthProvider: ParentComponent = (props) => {
     }
   };
 
-  // Activity event listener
   const handleActivity = () => {
     if (user()) {
       resetInactivityTimer();
     }
   };
 
+  const handleMouseMoveThrottled = () => {
+    if (!user()) return;
+    const now = Date.now();
+    if (now - lastMousemoveReset < MOUSEMOVE_THROTTLE_MS) return;
+    lastMousemoveReset = now;
+    resetInactivityTimer();
+  };
+
   onMount(async () => {
+    const bootStarted = Date.now();
     // Check for existing session
     const savedToken = localStorage.getItem('securevault_token');
     if (savedToken) {
@@ -82,24 +94,25 @@ export const AuthProvider: ParentComponent = (props) => {
         localStorage.removeItem('securevault_token');
       }
     }
+    await awaitMinElapsed(bootStarted, MIN_BOOTSTRAP_MS);
     setIsLoading(false);
 
-    // Add activity listeners
-    const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
-    events.forEach(event => {
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click'] as const;
+    events.forEach((event) => {
       document.addEventListener(event, handleActivity, { passive: true });
     });
+    document.addEventListener('mousemove', handleMouseMoveThrottled, { passive: true });
   });
 
   onCleanup(() => {
-    // Clean up timer and listeners
     if (inactivityTimer) {
       clearTimeout(inactivityTimer);
     }
-    const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
-    events.forEach(event => {
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click'] as const;
+    events.forEach((event) => {
       document.removeEventListener(event, handleActivity);
     });
+    document.removeEventListener('mousemove', handleMouseMoveThrottled);
   });
 
   const login = (newToken: string, newUser: User) => {

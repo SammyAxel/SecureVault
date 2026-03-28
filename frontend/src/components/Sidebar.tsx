@@ -1,21 +1,15 @@
 import { Show } from 'solid-js';
+import { formatSize } from '../lib/format';
 import { useAuth } from '../stores/auth';
+import type { DriveSection } from '../lib/routes';
 
-export type DriveSection = 'home' | 'drive' | 'shared' | 'trash';
+export type { DriveSection };
 
 export default function Sidebar(props: {
   active: DriveSection;
   onNavigate: (section: DriveSection) => void;
 }) {
   const { user } = useAuth();
-
-  const formatSize = (bytes: number) => {
-    if (!bytes) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${(bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 1)} ${sizes[i]}`;
-  };
 
   const storagePercent = () => {
     const u = user();
@@ -31,7 +25,7 @@ export default function Sidebar(props: {
     <button
       type="button"
       onClick={() => props.onNavigate(p.id)}
-      class={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+      class={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 ease-out ${
         props.active === p.id
           ? 'bg-primary-600/20 text-primary-200 ring-1 ring-primary-500/40'
           : 'text-gray-300 hover:bg-gray-800 hover:text-white'
@@ -102,7 +96,15 @@ export default function Sidebar(props: {
               />
             </div>
             <div class="mt-2 text-xs text-gray-400">
-              {formatSize(user()!.storageUsed)} / {formatSize(user()!.storageQuota)}
+              {formatSize(user()!.storageUsed, {
+                withTb: true,
+                fractionDigits: (i) => (i === 0 ? 0 : 1),
+              })}{' '}
+              /{' '}
+              {formatSize(user()!.storageQuota, {
+                withTb: true,
+                fractionDigits: (i) => (i === 0 ? 0 : 1),
+              })}
             </div>
           </div>
         </Show>

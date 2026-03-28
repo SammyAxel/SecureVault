@@ -122,7 +122,7 @@ export async function encryptFile(file: ArrayBuffer): Promise<{
   const iv = crypto.getRandomValues(new Uint8Array(12));
   
   const encrypted = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
+    { name: 'AES-GCM', iv: iv as BufferSource },
     key,
     file
   );
@@ -136,7 +136,7 @@ export async function decryptFile(
   iv: Uint8Array
 ): Promise<ArrayBuffer> {
   return crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv },
+    { name: 'AES-GCM', iv: iv as BufferSource },
     key,
     encrypted
   );
@@ -173,8 +173,11 @@ export async function unwrapKey(wrappedKey: string, privateKey: CryptoKey): Prom
 
 // ============ UTILITIES ============
 
-export function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
+export function arrayBufferToBase64(data: ArrayBuffer | ArrayBufferView): string {
+  const bytes =
+    data instanceof ArrayBuffer
+      ? new Uint8Array(data)
+      : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   let binary = '';
   for (let i = 0; i < bytes.byteLength; i++) {
     binary += String.fromCharCode(bytes[i]);

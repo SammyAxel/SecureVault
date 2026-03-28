@@ -328,6 +328,7 @@ export async function getTrash() {
       filename: string;
       fileSize: number;
       isFolder: boolean;
+      parentId: string | null;
       deletedAt: string;
     }>;
   }>('/trash');

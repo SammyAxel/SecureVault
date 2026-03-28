@@ -1,4 +1,7 @@
 import { createSignal, createEffect, Show, For, onMount, createMemo } from 'solid-js';
+import { formatSize } from '../lib/format';
+import { ROUTES } from '../lib/routes';
+import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../lib/motion';
 import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile } from './FilePreview';
 
 interface SharedFile {
@@ -106,7 +109,7 @@ export default function PublicShare() {
   // When user clicks browser back from share, go to home instead of previous page (e.g. folder view)
   onMount(() => {
     const handlePopState = () => {
-      window.location.href = '/';
+      window.location.href = ROUTES.home;
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -124,7 +127,7 @@ export default function PublicShare() {
   });
   
   const goToHome = () => {
-    window.location.href = '/';
+    window.location.href = ROUTES.home;
   };
   
   const getMimeType = (filename: string): string => {
@@ -135,61 +138,67 @@ export default function PublicShare() {
     return isPreviewableFile(filename);
   };
   
-  createEffect(async () => {
-    // Parse the fragment for decryption key
-    const fragment = parseFragment();
-    if (fragment) {
-      setDecryptionKey(fragment.key);
-      setDecryptionIv(fragment.iv);
-    }
-    
-    if (!token) {
-      setError('Invalid share link');
-      setIsLoading(false);
-      return;
-    }
-    
-    try {
-      const response = await fetch(`/api/public/${token}`);
-      const data = await response.json();
-      
-      if (!response.ok) {
-        setError(data.msg || 'Link not found or expired');
-      } else if (data.isFolder) {
-        // It's a folder share - ensure we always have folder object with children array
-        setIsFolder(true);
-        const folderData = data.folder;
-        if (!folderData) {
-          setError('Invalid share data');
-        } else {
-          setFolder({
-            id: folderData.id,
-            filename: folderData.filename || 'Folder',
-            children: Array.isArray(folderData.children) ? folderData.children : [],
-          });
-        }
-      } else {
-        // It's a single file share
-        setIsFolder(false);
-        setFile(data.file);
-        
-        // Auto-load preview for previewable files if we have the key
-        if (fragment && isPreviewable(data.file.filename)) {
-          loadPreview(fragment.key, fragment.iv, data.file.filename);
-        }
+  createEffect(() => {
+    void (async () => {
+      const t0 = Date.now();
+      // Parse the fragment for decryption key
+      const fragment = parseFragment();
+      if (fragment) {
+        setDecryptionKey(fragment.key);
+        setDecryptionIv(fragment.iv);
       }
-    } catch (err) {
-      setError('Failed to load shared content');
-    } finally {
-      setIsLoading(false);
-    }
+
+      if (!token) {
+        setError('Invalid share link');
+        await awaitMinElapsed(t0, MIN_CONTENT_LOAD_MS);
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/public/${token}`);
+        const data = await response.json();
+
+        if (!response.ok) {
+          setError(data.msg || 'Link not found or expired');
+        } else if (data.isFolder) {
+          // It's a folder share - ensure we always have folder object with children array
+          setIsFolder(true);
+          const folderData = data.folder;
+          if (!folderData) {
+            setError('Invalid share data');
+          } else {
+            setFolder({
+              id: folderData.id,
+              filename: folderData.filename || 'Folder',
+              children: Array.isArray(folderData.children) ? folderData.children : [],
+            });
+          }
+        } else {
+          // It's a single file share
+          setIsFolder(false);
+          setFile(data.file);
+
+          // Auto-load preview for previewable files if we have the key
+          if (fragment && isPreviewable(data.file.filename)) {
+            loadPreview(fragment.key, fragment.iv, data.file.filename);
+          }
+        }
+      } catch (err) {
+        setError('Failed to load shared content');
+      } finally {
+        await awaitMinElapsed(t0, MIN_CONTENT_LOAD_MS);
+        setIsLoading(false);
+      }
+    })();
   });
   
   const loadPreview = async (key: string, iv: string, filename: string) => {
     if (!token) return;
-    
+
+    const t0 = Date.now();
     setIsLoadingPreview(true);
-    
+
     try {
       const response = await fetch(`/api/public/${token}/download`);
       
@@ -219,6 +228,7 @@ export default function PublicShare() {
       console.error('Preview error:', err);
       // Don't show error, just don't show preview
     } finally {
+      await awaitMinElapsed(t0, MIN_CONTENT_LOAD_MS);
       setIsLoadingPreview(false);
     }
   };
@@ -329,14 +339,6 @@ export default function PublicShare() {
     }
   };
   
-  const formatSize = (bytes: number | undefined) => {
-    if (!bytes || bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-  };
-
   // Visible items: at root = folder().children, else = last folder in path's children
   const visibleItems = () => {
     const f = folder();
@@ -657,7 +659,7 @@ export default function PublicShare() {
                       </div>
                       <div class="flex-1 min-w-0">
                         <p class="text-white truncate">{item.filename}</p>
-                        <p class="text-gray-500 text-sm">{item.isFolder ? 'Folder' : formatSize(item.fileSize)}</p>
+                        <p class="text-gray-500 text-sm">{item.isFolder ? 'Folder' : formatSize(item.fileSize, { unset: '0 B', zero: '0 B' })}</p>
                       </div>
                       {!item.isFolder && (
                         <button
@@ -744,7 +746,7 @@ export default function PublicShare() {
               <div class="mb-6">{renderPreview()}</div>
             </Show>
             <h2 class="text-xl font-semibold text-white mb-1 break-all">{file()!.filename}</h2>
-            <p class="text-gray-400 text-sm mb-6">{formatSize(file()!.fileSize)}</p>
+            <p class="text-gray-400 text-sm mb-6">{formatSize(file()!.fileSize, { unset: '0 B', zero: '0 B' })}</p>
             <button
               onClick={handleDownload}
               disabled={isDownloading()}

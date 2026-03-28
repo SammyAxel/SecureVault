@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { db, schema } from '../db/index.js';
-import { eq, desc, sql, count, sum, and, gte } from 'drizzle-orm';
+import { eq, desc, sql, count, sum, and, gte, like } from 'drizzle-orm';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import {
   getVirusTotalApiKey,
@@ -235,14 +235,23 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const offset = (pageNum - 1) * limitNum;
-    
+
+    const searchTrimmed = search.trim();
+    const safeSearch = searchTrimmed.replace(/[%_]/g, '');
+    const searchFilter =
+      safeSearch.length > 0 ? like(schema.users.username, `%${safeSearch}%`) : undefined;
+
     const users = await db.query.users.findMany({
+      where: searchFilter,
       orderBy: (users: any, { desc }: any) => [desc(users.createdAt)],
       limit: limitNum,
       offset,
     });
-    
-    const [totalResult] = await db.select({ count: count() }).from(schema.users);
+
+    const [totalResult] = await db
+      .select({ count: count() })
+      .from(schema.users)
+      .where(searchFilter ?? sql`1`);
     const total = totalResult?.count || 0;
     
     return {

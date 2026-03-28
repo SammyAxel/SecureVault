@@ -69,8 +69,8 @@ export function AvatarCropper(props: AvatarCropperProps) {
   };
 
   return (
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-      <div class="bg-gray-800 rounded-xl max-w-2xl w-full overflow-hidden shadow-xl">
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 sv-modal-overlay">
+      <div class="bg-gray-800 rounded-xl max-w-2xl w-full overflow-hidden shadow-xl sv-modal-panel">
         <div class="p-4 border-b border-gray-700">
           <h3 class="text-lg font-semibold text-white">Adjust your profile picture</h3>
           <p class="text-gray-400 text-sm mt-1">

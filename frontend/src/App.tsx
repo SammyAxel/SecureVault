@@ -1,4 +1,4 @@
-import { createSignal, Show, createEffect, onMount } from 'solid-js';
+import { createSignal, Show, createEffect, createMemo, onMount, onCleanup, untrack } from 'solid-js';
 import { AuthProvider, useAuth } from './stores/auth.jsx';
 import Login from './components/Login';
 import Register from './components/Register';
@@ -9,26 +9,58 @@ import Setup from './components/Setup';
 import ToastContainer from './components/Toast';
 import ConfirmModal from './components/ConfirmModal';
 import PublicShare from './components/PublicShare';
-import Sidebar, { type DriveSection } from './components/Sidebar';
+import Sidebar from './components/Sidebar';
 import Home from './components/Home';
 import * as api from './lib/api';
+import {
+  ROUTES,
+  driveSectionFromPath,
+  pathForDriveSection,
+  pathForSectionSearch,
+  isProtectedVaultPath,
+  isDriveShellPath,
+  isVaultSearchRoute,
+  pathWithSearch,
+  parseSearchQuery,
+  hrefWithCurrentSearch,
+} from './lib/routes';
+import { awaitMinElapsed, MIN_SETUP_WIZARD_MS, MIN_SEARCH_FEEDBACK_MS } from './lib/motion';
 
-// Simple path-based routing
+function syncLocationToSignals(
+  setPath: (p: string) => void,
+  setSearch: (s: string) => void,
+  href: string
+) {
+  const url = new URL(href, window.location.origin);
+  setPath(url.pathname);
+  setSearch(url.search);
+}
+
+// Path + query routing (pathname and `?q=` for search)
 function useRoute() {
   const [path, setPath] = createSignal(window.location.pathname);
-  
+  const [locationSearch, setLocationSearch] = createSignal(window.location.search);
+
   createEffect(() => {
-    const handlePopState = () => setPath(window.location.pathname);
+    const handlePopState = () => {
+      setPath(window.location.pathname);
+      setLocationSearch(window.location.search);
+    };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   });
-  
-  const navigate = (newPath: string) => {
-    window.history.pushState({}, '', newPath);
-    setPath(newPath);
+
+  const navigate = (newHref: string) => {
+    window.history.pushState({}, '', newHref);
+    syncLocationToSignals(setPath, setLocationSearch, newHref);
   };
-  
-  return { path, navigate };
+
+  const replacePath = (newHref: string) => {
+    window.history.replaceState({}, '', newHref);
+    syncLocationToSignals(setPath, setLocationSearch, newHref);
+  };
+
+  return { path, locationSearch, navigate, replacePath };
 }
 
 function AppContent() {
@@ -36,59 +68,157 @@ function AppContent() {
   const [showRegister, setShowRegister] = createSignal(false);
   const [needsSetup, setNeedsSetup] = createSignal(false);
   const [checkingSetup, setCheckingSetup] = createSignal(true);
-  const { path, navigate } = useRoute();
-  const [driveSection, setDriveSection] = createSignal<DriveSection>('home');
-  const [globalSearch, setGlobalSearch] = createSignal('');
-  
-  // Check if we're on admin page
-  const isAdminPage = () => path() === '/admin';
-  
-  // Check if we're on profile page
-  const isProfilePage = () => path() === '/profile';
+  const { path, locationSearch, navigate, replacePath } = useRoute();
+  const initialVaultQ =
+    typeof window !== 'undefined' ? parseSearchQuery(window.location.search) : '';
+  const [searchApplied, setSearchApplied] = createSignal(initialVaultQ);
+  const [searchDraft, setSearchDraft] = createSignal(initialVaultQ);
+  const [searchLoading, setSearchLoading] = createSignal(false);
+  const [routeContentOpacity, setRouteContentOpacity] = createSignal(1);
+  const [routeEntering, setRouteEntering] = createSignal(false);
 
-  // Extract UID from /f/:uid path (folder view)
-  const getUIDFromPath = () => {
-    const match = path().match(/^\/f\/([a-zA-Z0-9-]+)/);
-    return match ? match[1] : null;
+  const clearVaultSearch = () => {
+    setSearchDraft('');
+    setSearchApplied('');
+    setSearchLoading(false);
+    const p = path();
+    if (isVaultSearchRoute(p)) {
+      replacePath(pathForDriveSection(driveSectionFromPath(p)));
+      return;
+    }
+    if (isDriveShellPath(p)) replacePath(pathWithSearch(p, ''));
   };
-  
-  // If a deep link to /f/:uid is opened, ensure the sidebar is on My Drive
+
+  const commitVaultSearch = () => {
+    const p = path();
+    if (!isDriveShellPath(p)) return;
+    const raw = searchDraft().trim();
+    setSearchApplied(raw);
+    setSearchLoading(true);
+    const section = driveSectionFromPath(p);
+    const next = raw
+      ? pathWithSearch(pathForSectionSearch(section), raw)
+      : isVaultSearchRoute(p)
+        ? pathForDriveSection(section)
+        : pathWithSearch(p, '');
+    const cur = `${window.location.pathname}${window.location.search}`;
+    if (next !== cur) replacePath(next);
+    requestAnimationFrame(() => {
+      window.setTimeout(() => setSearchLoading(false), MIN_SEARCH_FEEDBACK_MS);
+    });
+  };
+
+  const activeDriveSection = createMemo(() => driveSectionFromPath(path()));
+
+  let routeTransitionPrev = '';
   createEffect(() => {
-    if (getUIDFromPath() && driveSection() !== 'drive') {
-      setDriveSection('drive');
+    const p = path();
+    if (routeTransitionPrev !== '' && p !== routeTransitionPrev) {
+      // Instantly hide + shift down; new content already mounted by reactivity
+      setRouteContentOpacity(0);
+      setRouteEntering(true);
+      // Short pause so browser paints opacity=0 before we start the fade-in
+      const t = window.setTimeout(() => {
+        setRouteContentOpacity(1);
+        setRouteEntering(false);
+      }, 60);
+      onCleanup(() => clearTimeout(t));
+    }
+    routeTransitionPrev = p;
+  });
+
+  // Check if we're on admin page
+  const isAdminPage = () => path() === ROUTES.admin;
+
+  // Check if we're on profile page
+  const isProfilePage = () => path() === ROUTES.profile;
+
+  // Extract UID from /f/:uid path (folder/file deep link)
+  const getUIDFromPath = () => {
+    const match = path().match(/^\/f\/([^/?#]+)/);
+    return match ? decodeURIComponent(match[1]) : null;
+  };
+
+  // Canonical `/` and legacy `?q=` on base paths → `/…/search?q=` per tab; old `/search` → `/home/search`
+  createEffect(() => {
+    if (checkingSetup() || needsSetup()) return;
+    if (!user()) return;
+    if (path() === '/') {
+      const q = parseSearchQuery(locationSearch()).trim();
+      replacePath(q ? pathWithSearch(ROUTES.homeSearch, q) : ROUTES.home);
+      return;
+    }
+    const q = parseSearchQuery(locationSearch()).trim();
+    if (!q) return;
+    const p = path();
+    if (p === '/search') {
+      replacePath(pathWithSearch(ROUTES.homeSearch, q));
+      return;
+    }
+    const legacy: [string, string][] = [
+      [ROUTES.home, ROUTES.homeSearch],
+      [ROUTES.drive, ROUTES.driveSearch],
+      [ROUTES.shared, ROUTES.sharedSearch],
+      [ROUTES.trash, ROUTES.trashSearch],
+    ];
+    for (const [base, searchPath] of legacy) {
+      if (p === base) {
+        replacePath(pathWithSearch(searchPath, q));
+        return;
+      }
+    }
+    if (/^\/f\/[^/?#]+$/.test(p)) {
+      replacePath(pathWithSearch(ROUTES.driveSearch, q));
+    }
+  });
+
+  // URL `?q=` → applied query + input draft (back/forward, direct links). Not subscribed to draft while typing.
+  createEffect(() => {
+    if (checkingSetup() || needsSetup()) return;
+    if (!user()) return;
+    const p = path();
+    const loc = locationSearch();
+    if (!isDriveShellPath(p)) return;
+    const q = parseSearchQuery(loc);
+    const applied = untrack(() => searchApplied());
+    if (q !== applied) {
+      setSearchApplied(q);
+      setSearchDraft(q);
     }
   });
 
   // Sync path with login/register view: /login -> Login, /register -> Register
   createEffect(() => {
     const p = path();
-    if (p === '/login') setShowRegister(false);
-    else if (p === '/register') setShowRegister(true);
+    if (p === ROUTES.login) setShowRegister(false);
+    else if (p === ROUTES.register) setShowRegister(true);
   });
 
   // After login (or when already logged in on auth pages), redirect to home so URL is proper
   createEffect(() => {
     if (!user()) return;
     const p = path();
-    if (p === '/login' || p === '/register') navigate('/');
+    if (p === ROUTES.login || p === ROUTES.register) navigate(ROUTES.home);
   });
 
-  // When not logged in and on a protected path (e.g. /), redirect to /login
+  // When not logged in and on a protected path, redirect to /login (after session restore finishes)
   createEffect(() => {
     if (checkingSetup() || needsSetup()) return;
+    if (isLoading()) return;
     if (user()) return;
     const p = path();
-    if (p === '/' || p === '/admin' || p === '/profile') {
-      navigate('/login');
+    if (isProtectedVaultPath(p)) {
+      navigate(ROUTES.login);
     }
   });
 
   // Check setup status and register auth:logout listener on mount
   onMount(() => {
-    const handleLogout = () => navigate('/login');
+    const handleLogout = () => navigate(ROUTES.login);
     window.addEventListener('auth:logout', handleLogout);
 
     (async () => {
+      const started = Date.now();
       try {
         const status = await api.checkSetupStatus();
         setNeedsSetup(status.needsSetup);
@@ -96,6 +226,7 @@ function AppContent() {
         console.error('Failed to check setup status:', err);
         setNeedsSetup(false);
       } finally {
+        await awaitMinElapsed(started, MIN_SETUP_WIZARD_MS);
         setCheckingSetup(false);
       }
     })();
@@ -108,8 +239,8 @@ function AppContent() {
       {/* Loading state */}
       <Show when={checkingSetup()}>
         <div class="min-h-screen bg-gray-900 flex items-center justify-center">
-          <div class="text-center">
-            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto mb-4"></div>
+          <div class="text-center animate-sv-rise">
+            <div class="animate-spin rounded-full h-12 w-12 border-2 border-primary-500/30 border-t-primary-500 mx-auto mb-4"></div>
             <p class="text-gray-400">Loading SecureVault...</p>
           </div>
         </div>
@@ -122,16 +253,15 @@ function AppContent() {
 
       {/* Main app */}
       <Show when={!checkingSetup() && !needsSetup()}>
-        <div class="min-h-screen bg-gray-900">
+        <div class="min-h-screen bg-gray-900 animate-sv-rise">
           {/* Header */}
           <header class="bg-gray-800 border-b border-gray-700">
             <div class="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-4 flex items-center justify-between gap-2 flex-wrap">
               <div
                 class="flex items-center gap-2 sm:gap-3 cursor-pointer min-w-0 shrink-0"
                 onClick={() => {
-                  setDriveSection('drive');
-                  setGlobalSearch('');
-                  navigate('/');
+                  clearVaultSearch();
+                  if (path() !== ROUTES.home) navigate(ROUTES.home);
                 }}
               >
                 <div class="w-9 h-9 sm:w-10 sm:h-10 bg-primary-600 rounded-lg flex items-center justify-center shrink-0">
@@ -145,30 +275,54 @@ function AppContent() {
               <Show when={user()}>
                 <Show when={!isAdminPage() && !isProfilePage()}>
                   <div class="hidden md:flex flex-1 min-w-[240px] max-w-xl mx-2">
-                    <div class="relative w-full">
-                      <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                      </svg>
-                      <input
-                        type="text"
-                        placeholder="Search in SecureVault…"
-                        value={globalSearch()}
-                        onInput={(e) => setGlobalSearch(e.currentTarget.value)}
-                        class="w-full pl-10 pr-10 py-2 bg-gray-700/60 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                      <Show when={globalSearch()}>
-                        <button
-                          type="button"
-                          onClick={() => setGlobalSearch('')}
-                          class="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-white"
-                          title="Clear search"
+                    <form
+                      class="relative w-full flex items-center gap-2"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        commitVaultSearch();
+                      }}
+                      role="search"
+                    >
+                      <div class="relative flex-1 min-w-0">
+                        <svg
+                          class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
                         >
-                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        <input
+                          type="text"
+                          name="q"
+                          placeholder="search in vault"
+                          value={searchDraft()}
+                          onInput={(e) => setSearchDraft(e.currentTarget.value)}
+                          class="w-full pl-10 pr-10 py-2 bg-gray-700/60 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          autocomplete="off"
+                        />
+                        <Show when={searchDraft() || searchApplied()}>
+                          <button
+                            type="button"
+                            onClick={() => clearVaultSearch()}
+                            class="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-white"
+                            title="Hapus pencarian"
+                          >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </Show>
+                      </div>
+                      <Show when={searchLoading()}>
+                        <div
+                          class="shrink-0 w-9 h-9 flex items-center justify-center"
+                          aria-label="Mencari"
+                        >
+                          <div class="animate-spin rounded-full h-6 w-6 border-2 border-primary-400 border-t-transparent" />
+                        </div>
                       </Show>
-                    </div>
+                    </form>
                   </div>
                 </Show>
 
@@ -176,7 +330,9 @@ function AppContent() {
                   {/* Admin link: icon-only on small screens */}
                   <Show when={user()?.isAdmin}>
                     <button
-                      onClick={() => navigate(isAdminPage() ? '/' : '/admin')}
+                      onClick={() =>
+                        isAdminPage() ? window.history.back() : navigate(ROUTES.admin)
+                      }
                       class={`p-2 sm:px-3 sm:py-1.5 rounded-lg text-sm flex items-center gap-2 touch-target sm:min-h-0 ${
                         isAdminPage()
                           ? 'bg-primary-600 text-white'
@@ -196,6 +352,7 @@ function AppContent() {
                   <ProfileSection
                     user={user()!}
                     isProfilePage={isProfilePage()}
+                    onLeaveProfile={() => window.history.back()}
                     onNavigate={navigate}
                     onLogout={logout}
                   />
@@ -207,64 +364,72 @@ function AppContent() {
           {/* Main Content */}
           <main class="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
             <Show when={isLoading()}>
-              <div class="flex items-center justify-center h-64">
-                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
+              <div class="flex items-center justify-center h-64 animate-sv-rise">
+                <div class="animate-spin rounded-full h-12 w-12 border-2 border-primary-500/30 border-t-primary-500"></div>
               </div>
             </Show>
 
             <Show when={!isLoading()}>
+              <div
+                class={`sv-route-shell${routeEntering() ? ' sv-route-shell-entering' : ''}`}
+                style={{ opacity: String(routeContentOpacity()) }}
+              >
               <Show
                 when={user()}
                 fallback={
-                  <Show when={showRegister()} fallback={<Login onSwitchToRegister={() => navigate('/register')} />}>
-                    <Register onSwitchToLogin={() => navigate('/login')} />
+                  <Show when={showRegister()} fallback={<Login onSwitchToRegister={() => navigate(ROUTES.register)} />}>
+                    <Register onSwitchToLogin={() => navigate(ROUTES.login)} />
                   </Show>
                 }
               >
                 {/* Profile Page */}
                 <Show when={isProfilePage()}>
-                  <Profile onBack={() => navigate('/')} />
+                  <Profile onBack={() => window.history.back()} />
                 </Show>
 
                 {/* Admin Dashboard */}
                 <Show when={isAdminPage() && user()?.isAdmin && !isProfilePage()}>
-                  <AdminDashboard navigate={navigate} />
+                  <AdminDashboard />
                 </Show>
 
                 {/* Drive shell (Sidebar + content) */}
                 <Show when={!isAdminPage() && !isProfilePage()}>
                   <div class="flex gap-6">
                     <Sidebar
-                      active={driveSection()}
+                      active={activeDriveSection()}
                       onNavigate={(section) => {
-                        setDriveSection(section);
-                        navigate('/');
+                        clearVaultSearch();
+                        navigate(pathForDriveSection(section));
                       }}
                     />
                     <div class="flex-1 min-w-0">
                       <Show
-                        when={driveSection() === 'home'}
+                        when={activeDriveSection() === 'home'}
                         fallback={
                           <Dashboard
                             navigate={navigate}
+                            replaceHref={replacePath}
                             uid={getUIDFromPath()}
-                            section={driveSection() as any}
-                            onRequestNavigateRoot={() => navigate('/')}
-                            globalSearch={globalSearch()}
-                            onGlobalSearchChange={setGlobalSearch}
+                            section={activeDriveSection() as 'drive' | 'shared' | 'trash'}
+                            onRequestNavigateRoot={() =>
+                              navigate(hrefWithCurrentSearch(ROUTES.drive))
+                            }
+                            globalSearch={searchApplied()}
+                            clearVaultSearch={clearVaultSearch}
+                            searchLoading={searchLoading()}
                           />
                         }
                       >
                         <Home
-                          search={globalSearch()}
+                          search={searchApplied()}
+                          searchLoading={searchLoading()}
                           onOpenFolder={(id, name, uid) => {
-                            setDriveSection('drive');
-                            navigate(uid ? `/f/${uid}` : '/');
+                            navigate(hrefWithCurrentSearch(uid ? `/f/${uid}` : ROUTES.drive));
                           }}
                           onOpenFile={(file) => {
-                            setDriveSection('drive');
-                            // If file has a UID, deep link to it; Dashboard will open preview
-                            if ((file as any).uid) navigate(`/f/${(file as any).uid}`);
+                            if ((file as any).uid) {
+                              navigate(hrefWithCurrentSearch(`/f/${(file as any).uid}`));
+                            }
                           }}
                           onDownloadFile={() => {}}
                         />
@@ -273,6 +438,7 @@ function AppContent() {
                   </div>
                 </Show>
               </Show>
+              </div>
             </Show>
           </main>
         </div>
@@ -281,12 +447,13 @@ function AppContent() {
   );
 }
 
-const DROPDOWN_DURATION_MS = 200;
+const DROPDOWN_DURATION_MS = 240;
 
 // Profile section with dropdown (Discord-style: user info + Logout at bottom)
 function ProfileSection(props: {
   user: { username: string; displayName?: string; avatar?: string };
   isProfilePage: boolean;
+  onLeaveProfile: () => void;
   onNavigate: (path: string) => void;
   onLogout: () => void;
 }) {
@@ -377,7 +544,11 @@ function ProfileSection(props: {
           {/* Profile Settings */}
           <button
             type="button"
-            onClick={() => { props.onNavigate(props.isProfilePage ? '/' : '/profile'); closeDropdown(); }}
+            onClick={() => {
+              if (props.isProfilePage) props.onLeaveProfile();
+              else props.onNavigate(ROUTES.profile);
+              closeDropdown();
+            }}
             class="w-full px-3 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 hover:text-white flex items-center gap-2 transition-colors duration-150"
             role="menuitem"
           >

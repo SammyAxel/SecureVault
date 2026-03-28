@@ -7,6 +7,7 @@ import {
   unwrapKey,
   arrayBufferToBase64,
 } from '../lib/crypto';
+import { awaitMinElapsed, MIN_FORM_SUBMIT_MS } from '../lib/motion';
 
 interface ShareModalProps {
   file: FileItem;
@@ -25,6 +26,7 @@ export default function ShareModal(props: ShareModalProps) {
   const [copied, setCopied] = createSignal(false);
 
   const createShare = async () => {
+    const opStart = Date.now();
     setError('');
     setIsLoading(true);
     
@@ -83,6 +85,7 @@ export default function ShareModal(props: ShareModalProps) {
     } catch (err: any) {
       setError(err.message || 'Failed to create share link');
     } finally {
+      await awaitMinElapsed(opStart, MIN_FORM_SUBMIT_MS);
       setIsLoading(false);
     }
   };
@@ -96,8 +99,14 @@ export default function ShareModal(props: ShareModalProps) {
   };
 
   return (
-    <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={props.onClose}>
-      <div class="bg-gray-800 rounded-xl max-w-md w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
+    <div
+      class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 sv-modal-overlay"
+      onClick={props.onClose}
+    >
+      <div
+        class="bg-gray-800 rounded-xl max-w-md w-full overflow-hidden sv-modal-panel"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div class="flex items-center justify-between px-6 py-4 border-b border-gray-700">
           <h3 class="text-lg font-medium text-white">

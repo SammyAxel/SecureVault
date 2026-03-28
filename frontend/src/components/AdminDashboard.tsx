@@ -2,18 +2,28 @@ import { createSignal, createEffect, For, Show } from 'solid-js';
 import { useAuth } from '../stores/auth.jsx';
 import * as api from '../lib/api';
 import type { AdminStats, AdminUser, AuditLogEntry, UserSession, VirusTotalKey, VirusTotalUsage } from '../lib/api';
+import { formatSize } from '../lib/format';
 import { toast } from '../stores/toast';
 import { openConfirm } from '../stores/confirm';
+import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../lib/motion';
 
 type TabType = 'overview' | 'users' | 'audit' | 'settings';
 
-interface AdminDashboardProps {
-  navigate: (path: string) => void;
-}
-
-export default function AdminDashboard(props: AdminDashboardProps) {
+export default function AdminDashboard() {
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = createSignal<TabType>('overview');
+  const [tabVisible, setTabVisible] = createSignal(true);
+  let tabTimeout: ReturnType<typeof setTimeout> | undefined;
+
+  const switchTab = (tab: TabType) => {
+    if (tab === activeTab()) return;
+    if (tabTimeout) clearTimeout(tabTimeout);
+    setTabVisible(false);
+    tabTimeout = setTimeout(() => {
+      setActiveTab(tab);
+      requestAnimationFrame(() => setTabVisible(true));
+    }, 200);
+  };
   const [stats, setStats] = createSignal<AdminStats | null>(null);
   const [users, setUsers] = createSignal<AdminUser[]>([]);
   const [auditLogs, setAuditLogs] = createSignal<AuditLogEntry[]>([]);
@@ -63,6 +73,7 @@ export default function AdminDashboard(props: AdminDashboardProps) {
 
   // Load users
   const loadUsers = async (page = 1) => {
+    const started = Date.now();
     setIsLoading(true);
     try {
       const result = await api.getAdminUsers(page, 20);
@@ -72,6 +83,7 @@ export default function AdminDashboard(props: AdminDashboardProps) {
     } catch (error) {
       console.error('Failed to load users:', error);
     } finally {
+      await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
       setIsLoading(false);
     }
   };
@@ -166,6 +178,7 @@ export default function AdminDashboard(props: AdminDashboardProps) {
       title: 'Remove API Key',
       message: 'Are you sure you want to remove this VirusTotal API key? This action cannot be undone.',
       confirmText: 'Remove',
+      type: 'danger',
       confirmButtonClass: 'bg-red-600 hover:bg-red-700',
     });
     if (!confirmed) return;
@@ -185,6 +198,7 @@ export default function AdminDashboard(props: AdminDashboardProps) {
 
   // Load audit logs
   const loadAuditLogs = async (page = 1) => {
+    const started = Date.now();
     setIsLoading(true);
     try {
       const result = await api.getAuditLogs(page, logsLimit());
@@ -194,6 +208,7 @@ export default function AdminDashboard(props: AdminDashboardProps) {
     } catch (error) {
       console.error('Failed to load audit logs:', error);
     } finally {
+      await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
       setIsLoading(false);
     }
   };
@@ -285,14 +300,8 @@ export default function AdminDashboard(props: AdminDashboardProps) {
     }
   };
 
-  // Format file size
-  const formatSize = (bytes: number) => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
+  const adminFormatSize = (bytes: number) =>
+    formatSize(bytes, { withTb: true, fractionDigits: 2 });
 
   // Format date
   const formatDate = (dateStr: string) => {
@@ -322,7 +331,8 @@ export default function AdminDashboard(props: AdminDashboardProps) {
           <p class="text-gray-400 mt-1">Manage users, view statistics, and audit logs</p>
         </div>
         <button
-          onClick={() => props.navigate('/')}
+          type="button"
+          onClick={() => window.history.back()}
           class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm flex items-center gap-2"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -335,8 +345,8 @@ export default function AdminDashboard(props: AdminDashboardProps) {
       {/* Tabs */}
       <div class="flex gap-2 mb-6 border-b border-gray-700">
         <button
-          onClick={() => setActiveTab('overview')}
-          class={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+          onClick={() => switchTab('overview')}
+          class={`px-4 py-3 text-sm font-medium border-b-2 transition-all duration-200 ${
             activeTab() === 'overview'
               ? 'border-primary-500 text-primary-400'
               : 'border-transparent text-gray-400 hover:text-white'
@@ -345,8 +355,8 @@ export default function AdminDashboard(props: AdminDashboardProps) {
           Overview
         </button>
         <button
-          onClick={() => setActiveTab('users')}
-          class={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+          onClick={() => switchTab('users')}
+          class={`px-4 py-3 text-sm font-medium border-b-2 transition-all duration-200 ${
             activeTab() === 'users'
               ? 'border-primary-500 text-primary-400'
               : 'border-transparent text-gray-400 hover:text-white'
@@ -355,8 +365,8 @@ export default function AdminDashboard(props: AdminDashboardProps) {
           User Management
         </button>
         <button
-          onClick={() => setActiveTab('audit')}
-          class={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+          onClick={() => switchTab('audit')}
+          class={`px-4 py-3 text-sm font-medium border-b-2 transition-all duration-200 ${
             activeTab() === 'audit'
               ? 'border-primary-500 text-primary-400'
               : 'border-transparent text-gray-400 hover:text-white'
@@ -365,8 +375,8 @@ export default function AdminDashboard(props: AdminDashboardProps) {
           Audit Logs
         </button>
         <button
-          onClick={() => setActiveTab('settings')}
-          class={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+          onClick={() => switchTab('settings')}
+          class={`px-4 py-3 text-sm font-medium border-b-2 transition-all duration-200 ${
             activeTab() === 'settings'
               ? 'border-primary-500 text-primary-400'
               : 'border-transparent text-gray-400 hover:text-white'
@@ -375,6 +385,9 @@ export default function AdminDashboard(props: AdminDashboardProps) {
           Settings
         </button>
       </div>
+
+      {/* Tab Panels — animated fade+rise between tabs */}
+      <div class={`sv-tab-panel${tabVisible() ? '' : ' sv-tab-panel-out'}`}>
 
       {/* Overview Tab */}
       <Show when={activeTab() === 'overview'}>
@@ -419,7 +432,7 @@ export default function AdminDashboard(props: AdminDashboardProps) {
               </div>
               <div>
                 <p class="text-gray-400 text-sm">Total Storage Used</p>
-                <p class="text-2xl font-bold text-white">{formatSize(stats()?.totalStorage || 0)}</p>
+                <p class="text-2xl font-bold text-white">{adminFormatSize(stats()?.totalStorage || 0)}</p>
                 <p class="text-gray-500 text-xs mt-0.5">by all users</p>
               </div>
             </div>
@@ -436,8 +449,8 @@ export default function AdminDashboard(props: AdminDashboardProps) {
                 </div>
                 <div>
                   <p class="text-gray-400 text-sm">Filesystem (storage backend)</p>
-                  <p class="text-2xl font-bold text-white">{formatSize(stats()!.storageBackend!.free)} free</p>
-                  <p class="text-gray-500 text-xs mt-0.5">of {formatSize(stats()!.storageBackend!.total)} total</p>
+                  <p class="text-2xl font-bold text-white">{adminFormatSize(stats()!.storageBackend!.free)} free</p>
+                  <p class="text-gray-500 text-xs mt-0.5">of {adminFormatSize(stats()!.storageBackend!.total)} total</p>
                 </div>
               </div>
             </div>
@@ -515,8 +528,8 @@ export default function AdminDashboard(props: AdminDashboardProps) {
                       </td>
                       <td class="px-4 py-3">
                         <div class="text-sm">
-                          <p class="text-white">{formatSize(u.storageUsed)}</p>
-                          <p class="text-gray-500">of {formatSize(u.storageQuota)}</p>
+                          <p class="text-white">{adminFormatSize(u.storageUsed)}</p>
+                          <p class="text-gray-500">of {adminFormatSize(u.storageQuota)}</p>
                         </div>
                       </td>
                       <td class="px-4 py-3">
@@ -915,10 +928,18 @@ export default function AdminDashboard(props: AdminDashboardProps) {
         </div>
       </Show>
 
+      </div>{/* end sv-tab-panel */}
+
       {/* Audit Log Detail Modal */}
       <Show when={selectedLogDetail()}>
-        <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setSelectedLogDetail(null)}>
-          <div class="bg-gray-800 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div
+          class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 sv-modal-overlay"
+          onClick={() => setSelectedLogDetail(null)}
+        >
+          <div
+            class="bg-gray-800 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col sv-modal-panel"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div class="flex items-center justify-between px-6 py-4 border-b border-gray-700">
               <h3 class="text-lg font-medium text-white">
                 Audit Log Details
@@ -1015,8 +1036,14 @@ export default function AdminDashboard(props: AdminDashboardProps) {
 
       {/* User Sessions Modal */}
       <Show when={selectedUser()}>
-        <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setSelectedUser(null)}>
-          <div class="bg-gray-800 rounded-xl max-w-2xl w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div
+          class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 sv-modal-overlay"
+          onClick={() => setSelectedUser(null)}
+        >
+          <div
+            class="bg-gray-800 rounded-xl max-w-2xl w-full overflow-hidden sv-modal-panel"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div class="flex items-center justify-between px-6 py-4 border-b border-gray-700">
               <h3 class="text-lg font-medium text-white">
                 Sessions for {selectedUser()?.username}
@@ -1069,8 +1096,14 @@ export default function AdminDashboard(props: AdminDashboardProps) {
 
       {/* Quota Edit Modal */}
       <Show when={quotaUser()}>
-        <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setQuotaUser(null)}>
-          <div class="bg-gray-800 rounded-xl max-w-md w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div
+          class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 sv-modal-overlay"
+          onClick={() => setQuotaUser(null)}
+        >
+          <div
+            class="bg-gray-800 rounded-xl max-w-md w-full overflow-hidden sv-modal-panel"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div class="flex items-center justify-between px-6 py-4 border-b border-gray-700">
               <h3 class="text-lg font-medium text-white">
                 Edit Quota for {quotaUser()?.username}
@@ -1086,7 +1119,7 @@ export default function AdminDashboard(props: AdminDashboardProps) {
             </div>
             <div class="p-6">
               <p class="text-gray-400 text-sm mb-4">
-                Current usage: {formatSize(quotaUser()?.storageUsed || 0)}
+                Current usage: {adminFormatSize(quotaUser()?.storageUsed || 0)}
               </p>
               <label class="block text-sm text-gray-400 mb-2">New quota (MB)</label>
               <input

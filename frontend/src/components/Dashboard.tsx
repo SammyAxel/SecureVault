@@ -1,11 +1,15 @@
-import { createSignal, createEffect, For, Show } from 'solid-js';
+import { createSignal, createEffect, createMemo, For, Show, onCleanup } from 'solid-js';
 import { useAuth } from '../stores/auth.jsx';
 import * as api from '../lib/api';
+import { ApiError } from '../lib/api';
 import type { FileItem } from '../lib/api';
+import { formatSize } from '../lib/format';
 import ShareModal from './ShareModal';
 import NotificationCenter from './NotificationCenter';
 import Breadcrumb from './Breadcrumb';
 import { toast } from '../stores/toast';
+import { ROUTES, hrefWithCurrentSearch } from '../lib/routes';
+import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../lib/motion';
 import { openConfirm } from '../stores/confirm';
 import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile, getFileExtension } from './FilePreview';
 import { SkeletonDashboard } from './Skeleton';
@@ -32,16 +36,20 @@ function isPreviewable(filename: string): boolean {
 
 interface DashboardProps {
   navigate?: (path: string) => void;
+  /** Updates URL without a new history entry; keeps App route state in sync with `replaceState`. */
+  replaceHref?: (href: string) => void;
   /** When provided, Dashboard will load this folder/file by UID and sync breadcrumbs. */
   uid?: string | null;
   /** Sidebar section (My Drive / Shared / Trash). */
   section?: 'drive' | 'shared' | 'trash';
   /** Used to normalize the URL back to `/` when leaving folder views. */
   onRequestNavigateRoot?: () => void;
-  /** Global search query from header. */
+  /** Committed search query from header (after Enter). */
   globalSearch?: string;
-  /** Update global search query from Dashboard interactions (optional). */
-  onGlobalSearchChange?: (query: string) => void;
+  /** Clear header search + `?q=` (e.g. “Clear filters”). */
+  clearVaultSearch?: () => void;
+  /** Brief overlay while search is applied. */
+  searchLoading?: boolean;
 }
 
 export default function Dashboard(props: DashboardProps) {
@@ -91,6 +99,10 @@ export default function Dashboard(props: DashboardProps) {
   const [menuPosition, setMenuPosition] = createSignal<{ top: number; left: number } | null>(null);
   const section = () => props.section || 'drive';
 
+  // Trash folder navigation state
+  const [trashCurrentFolder, setTrashCurrentFolder] = createSignal<string | null>(null);
+  const [trashFolderPath, setTrashFolderPath] = createSignal<Array<{ id: string | null; uid: string | null; name: string }>>([{ id: null, uid: null, name: 'Trash' }]);
+
   // Sync local search with global header search
   createEffect(() => {
     const q = props.globalSearch ?? '';
@@ -113,32 +125,43 @@ export default function Dashboard(props: DashboardProps) {
     return 'other';
   };
 
-  // Filtered and sorted files
-  const filteredFiles = () => {
-    let result = files();
+  // For trash: pre-filter files to only show items at the current trash navigation level
+  const trashLevelFiles = createMemo((): FileItem[] => {
+    if (section() !== 'trash') return files();
+    const currentTrashFolder = trashCurrentFolder();
+    const allFiles = files();
+    if (currentTrashFolder === null) {
+      // Root of trash: only show items whose parent is not also in the trash list
+      const trashedIds = new Set(allFiles.map(f => f.id));
+      return allFiles.filter(f => f.parentId === null || !trashedIds.has(f.parentId));
+    } else {
+      // Inside a trashed folder: show only direct children
+      return allFiles.filter(f => f.parentId === currentTrashFolder);
+    }
+  });
 
-    // Apply search
+  // Filtered and sorted files (memoized: JSX reads this multiple times per update)
+  const filteredFiles = createMemo((): FileItem[] => {
+    let result = trashLevelFiles();
+
     const query = searchQuery().toLowerCase().trim();
     if (query) {
       result = result.filter(f => f.filename.toLowerCase().includes(query));
     }
 
-    // Apply filter
     const filter = filterType();
     if (filter !== 'all') {
       result = result.filter(f => getFileCategory(f.filename, f.isFolder) === filter);
     }
 
-    // Apply sort
     const sort = sortBy();
     const order = sortOrder();
     result = [...result].sort((a, b) => {
       let comparison = 0;
-      
-      // Folders first
+
       if (a.isFolder && !b.isFolder) return -1;
       if (!a.isFolder && b.isFolder) return 1;
-      
+
       if (sort === 'name') {
         comparison = a.filename.localeCompare(b.filename);
       } else if (sort === 'date') {
@@ -146,15 +169,16 @@ export default function Dashboard(props: DashboardProps) {
       } else if (sort === 'size') {
         comparison = a.fileSize - b.fileSize;
       }
-      
+
       return order === 'asc' ? comparison : -comparison;
     });
 
     return result;
-  };
+  });
 
   // Load files for the active section
   const loadFiles = async () => {
+    const started = Date.now();
     setIsLoading(true);
     try {
       if (section() === 'drive') {
@@ -176,7 +200,6 @@ export default function Dashboard(props: DashboardProps) {
             createdAt: f.sharedAt,
             encryptedKey: f.encryptedKey,
             iv: f.iv,
-            // @ts-expect-error - UI-only field, not part of FileItem
             owner: f.owner,
           }))
         );
@@ -191,7 +214,7 @@ export default function Dashboard(props: DashboardProps) {
             filename: f.filename,
             fileSize: f.fileSize,
             isFolder: f.isFolder,
-            parentId: null,
+            parentId: f.parentId,
             createdAt: f.deletedAt,
             encryptedKey: '',
             iv: '',
@@ -202,6 +225,7 @@ export default function Dashboard(props: DashboardProps) {
     } catch (error) {
       console.error('Failed to load files:', error);
     } finally {
+      await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
       setIsLoading(false);
     }
   };
@@ -229,9 +253,15 @@ export default function Dashboard(props: DashboardProps) {
     if (!uid) return;
     if (section() !== 'drive') return; // only meaningful for My Drive
 
+    let cancelled = false;
+    onCleanup(() => {
+      cancelled = true;
+    });
+
     (async () => {
       try {
         const result = await api.getFileByUid(uid);
+        if (cancelled) return;
         if (!result?.file) return;
 
         const root = { id: null, uid: null, name: 'My Files' as const };
@@ -247,15 +277,19 @@ export default function Dashboard(props: DashboardProps) {
           setFolderPath([root, ...parents]);
           setCurrentFolderUid(parents.length ? parents[parents.length - 1].uid : null);
           setCurrentFolder(parents.length ? parents[parents.length - 1].id : null);
-          // Open file preview
           await handleOpen(result.file);
         }
       } catch (e) {
-        // If the UID isn't accessible, fall back to root
-        setFolderPath([{ id: null, uid: null, name: 'My Files' }]);
-        setCurrentFolderUid(null);
-        setCurrentFolder(null);
-        props.onRequestNavigateRoot?.();
+        if (cancelled) return;
+        const is404 = e instanceof ApiError && e.status === 404;
+        if (is404) {
+          setFolderPath([{ id: null, uid: null, name: 'My Files' }]);
+          setCurrentFolderUid(null);
+          setCurrentFolder(null);
+          props.onRequestNavigateRoot?.();
+          return;
+        }
+        toast.error(e instanceof Error ? e.message : 'Could not open this link');
       }
     })();
   });
@@ -279,12 +313,12 @@ export default function Dashboard(props: DashboardProps) {
       setFolderPath([{ id: null, uid: null, name: 'My Files' }]);
       setCurrentFolderUid(null);
       setCurrentFolder(null);
-      if (props.navigate) props.navigate('/');
+      if (props.navigate) props.navigate(hrefWithCurrentSearch(ROUTES.drive));
     } else {
       setFolderPath([...folderPath(), { id: folderId, uid: folderUid || null, name: folderName }]);
       setCurrentFolderUid(folderUid || null);
       setCurrentFolder(folderId);
-      if (props.navigate && folderUid) props.navigate(`/f/${folderUid}`);
+      if (props.navigate && folderUid) props.navigate(hrefWithCurrentSearch(`/f/${folderUid}`));
     }
   };
 
@@ -296,10 +330,31 @@ export default function Dashboard(props: DashboardProps) {
     setCurrentFolderUid(lastItem.uid);
     // Update URL so deep links remain stable
     if (props.navigate) {
-      if (lastItem.uid) props.navigate(`/f/${lastItem.uid}`);
-      else props.navigate('/');
+      if (lastItem.uid) props.navigate(hrefWithCurrentSearch(`/f/${lastItem.uid}`));
+      else props.navigate(hrefWithCurrentSearch(ROUTES.drive));
     }
   };
+
+  // Trash folder navigation
+  const navigateIntoTrashFolder = (file: FileItem) => {
+    setTrashCurrentFolder(file.id);
+    setTrashFolderPath(prev => [...prev, { id: file.id, uid: null, name: file.filename }]);
+  };
+
+  const navigateTrashUp = (index: number) => {
+    const newPath = trashFolderPath().slice(0, index + 1);
+    setTrashFolderPath(newPath);
+    const lastItem = newPath[newPath.length - 1];
+    setTrashCurrentFolder(lastItem.id);
+  };
+
+  // Reset trash navigation when leaving trash section
+  createEffect(() => {
+    if (section() !== 'trash') {
+      setTrashCurrentFolder(null);
+      setTrashFolderPath([{ id: null, uid: null, name: 'Trash' }]);
+    }
+  });
 
   // Handle file upload (optional targetFolderId = upload into that folder; else current folder)
   const handleUpload = async (fileList: FileList, targetFolderId?: string | null) => {
@@ -433,8 +488,10 @@ export default function Dashboard(props: DashboardProps) {
 
       setPreviewFile({ url, filename: file.filename, mimeType, fileUid: file.uid });
       // Update URL with file UID
-      if (props.navigate && file.uid) {
-        window.history.replaceState({}, '', `/f/${file.uid}`);
+      if (file.uid) {
+        const href = hrefWithCurrentSearch(`/f/${file.uid}`);
+        if (props.replaceHref) props.replaceHref(href);
+        else window.history.replaceState({}, '', href);
       }
       setUploadProgress(null);
     } catch (error: any) {
@@ -452,14 +509,12 @@ export default function Dashboard(props: DashboardProps) {
     }
     setPreviewFile(null);
     // Reset URL to current folder
-    if (props.navigate) {
-      const folderUid = currentFolderUid();
-      if (folderUid) {
-        window.history.replaceState({}, '', `/f/${folderUid}`);
-      } else {
-        window.history.replaceState({}, '', '/');
-      }
-    }
+    const folderUid = currentFolderUid();
+    const href = folderUid
+      ? hrefWithCurrentSearch(`/f/${folderUid}`)
+      : hrefWithCurrentSearch(ROUTES.drive);
+    if (props.replaceHref) props.replaceHref(href);
+    else window.history.replaceState({}, '', href);
   };
 
   // Copy UID link to clipboard
@@ -661,14 +716,14 @@ export default function Dashboard(props: DashboardProps) {
   const toggleSelectAll = () => {
     const visibleFiles = filteredFiles();
     if (selectedFiles().size === visibleFiles.length) {
-      setSelectedFiles(new Set());
+      setSelectedFiles(new Set<string>());
     } else {
-      setSelectedFiles(new Set(visibleFiles.map(f => f.id)));
+      setSelectedFiles(new Set(visibleFiles.map((f) => f.id)));
     }
   };
 
   const clearSelection = () => {
-    setSelectedFiles(new Set());
+    setSelectedFiles(new Set<string>());
   };
 
   // Bulk delete
@@ -881,15 +936,6 @@ export default function Dashboard(props: DashboardProps) {
     }
   };
 
-  // Format file size
-  const formatSize = (bytes: number) => {
-    if (bytes === 0) return '—';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-  };
-
   return (
     <div class="pb-20">
       {/* Top bar: stacks on mobile */}
@@ -898,11 +944,17 @@ export default function Dashboard(props: DashboardProps) {
           <Show
             when={section() === 'drive'}
             fallback={
-              <div class="flex items-center gap-2">
-                <h2 class="text-lg sm:text-xl font-semibold text-white">
-                  {section() === 'shared' ? 'Shared with me' : 'Trash'}
-                </h2>
-              </div>
+              <Show
+                when={section() === 'trash'}
+                fallback={
+                  <div class="flex items-center gap-2">
+                    <h2 class="text-lg sm:text-xl font-semibold text-white">Shared with me</h2>
+                  </div>
+                }
+              >
+                {/* Trash breadcrumb navigation */}
+                <Breadcrumb items={trashFolderPath()} onNavigate={navigateTrashUp} />
+              </Show>
             }
           >
             {/* Breadcrumb: scrolls horizontally on mobile */}
@@ -1072,18 +1124,19 @@ export default function Dashboard(props: DashboardProps) {
       </Show>
 
       {/* Drop zone / File list */}
-      <div
-        class={section() === 'drive' ? `drop-zone ${isDragging() ? 'dragover' : ''}` : 'rounded-xl'}
-        onDragOver={section() === 'drive' ? handleDragOver : undefined}
-        onDragLeave={section() === 'drive' ? handleDragLeave : undefined}
-        onDrop={section() === 'drive' ? handleDrop : undefined}
-      >
-        <Show when={isLoading()}>
-          <SkeletonDashboard />
-        </Show>
+      <div class="relative">
+        <div
+          class={section() === 'drive' ? `drop-zone ${isDragging() ? 'dragover' : ''}` : 'rounded-xl'}
+          onDragOver={section() === 'drive' ? handleDragOver : undefined}
+          onDragLeave={section() === 'drive' ? handleDragLeave : undefined}
+          onDrop={section() === 'drive' ? handleDrop : undefined}
+        >
+          <Show when={isLoading()}>
+            <SkeletonDashboard />
+          </Show>
 
         {/* Empty state - no files at all */}
-        <Show when={!isLoading() && files().length === 0}>
+        <Show when={!isLoading() && trashLevelFiles().length === 0}>
           <div class="py-12 text-center">
             <svg class="w-16 h-16 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
@@ -1092,7 +1145,11 @@ export default function Dashboard(props: DashboardProps) {
               when={section() === 'drive'}
               fallback={
                 <p class="text-gray-400">
-                  {section() === 'shared' ? 'No files have been shared with you yet.' : 'Trash is empty.'}
+                  {section() === 'shared'
+                    ? 'No files have been shared with you yet.'
+                    : trashCurrentFolder() !== null
+                      ? 'This folder is empty.'
+                      : 'Trash is empty.'}
                 </p>
               }
             >
@@ -1103,7 +1160,7 @@ export default function Dashboard(props: DashboardProps) {
         </Show>
 
         {/* No search/filter results */}
-        <Show when={!isLoading() && files().length > 0 && filteredFiles().length === 0}>
+        <Show when={!isLoading() && trashLevelFiles().length > 0 && filteredFiles().length === 0}>
           <div class="py-12 text-center">
             <svg class="w-16 h-16 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1111,7 +1168,11 @@ export default function Dashboard(props: DashboardProps) {
             <p class="text-gray-400 mb-2">No matching files found</p>
             <p class="text-gray-500 text-sm">Try adjusting your search or filter criteria</p>
             <button
-              onClick={() => { setSearchQuery(''); setFilterType('all'); }}
+              onClick={() => {
+                setSearchQuery('');
+                setFilterType('all');
+                props.clearVaultSearch?.();
+              }}
               class="mt-4 text-primary-400 hover:text-primary-300 text-sm"
             >
               Clear filters
@@ -1178,6 +1239,10 @@ export default function Dashboard(props: DashboardProps) {
                             <button
                               type="button"
                               onClick={() => {
+                                if (section() === 'trash') {
+                                  navigateIntoTrashFolder(file);
+                                  return;
+                                }
                                 if (section() !== 'drive') {
                                   toast.info('Folder navigation is only available in My Drive.');
                                   return;
@@ -1196,20 +1261,9 @@ export default function Dashboard(props: DashboardProps) {
                           ) : (
                             <button
                               type="button"
-                              class={`text-left ${
-                                section() === 'trash'
-                                  ? 'text-gray-400 cursor-default'
-                                  : `text-white ${isPreviewable(file.filename) ? 'hover:text-primary-400' : ''}`
-                              }`}
-                              disabled={section() === 'trash'}
-                              onClick={() => section() !== 'trash' && isPreviewable(file.filename) && handleOpen(file)}
-                              title={
-                                section() === 'trash'
-                                  ? 'Preview is not available in Trash'
-                                  : isPreviewable(file.filename)
-                                    ? 'Click to preview'
-                                    : ''
-                              }
+                              class={`text-left text-white ${isPreviewable(file.filename) ? 'hover:text-primary-400' : ''}`}
+                              onClick={() => isPreviewable(file.filename) && handleOpen(file)}
+                              title={isPreviewable(file.filename) ? 'Click to preview' : ''}
                             >
                               {file.filename}
                               <Show when={(file as any).owner}>
@@ -1222,7 +1276,7 @@ export default function Dashboard(props: DashboardProps) {
                         </div>
                       </td>
                       <td class="px-4 py-3 text-gray-400 text-sm">
-                        {formatSize(file.fileSize)}
+                        {formatSize(file.fileSize, { zero: 'dash' })}
                       </td>
                       <td class="px-4 py-3 text-gray-400 text-sm">
                         {new Date(file.createdAt).toLocaleDateString()}
@@ -1266,6 +1320,15 @@ export default function Dashboard(props: DashboardProps) {
           </div>
         </Show>
       </div>
+      <Show when={props.searchLoading}>
+        <div class="absolute inset-0 z-10 flex items-center justify-center bg-gray-900/55 backdrop-blur-[1px] rounded-xl pointer-events-none min-h-[120px]">
+          <div class="flex flex-col items-center gap-2">
+            <div class="animate-spin rounded-full h-10 w-10 border-2 border-primary-400 border-t-transparent" />
+            <p class="text-sm text-gray-300">Mencari…</p>
+          </div>
+        </div>
+      </Show>
+      </div>
 
       {/* Fixed Position Action Menu (Portal-like) */}
       <Show when={openMenuId() && menuPosition()}>
@@ -1278,7 +1341,7 @@ export default function Dashboard(props: DashboardProps) {
               class="fixed w-48 max-w-[calc(100vw-1rem)] bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 action-menu-container"
               style={{ top: `${pos.top}px`, left: `${pos.left}px` }}
             >
-              {section() !== 'trash' && !file.isFolder && isPreviewable(file.filename) && (
+              {!file.isFolder && isPreviewable(file.filename) && (
                 <button
                   onClick={() => { handleOpen(file); setOpenMenuId(null); setMenuPosition(null); }}
                   class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2 rounded-t-lg"
@@ -1383,8 +1446,14 @@ export default function Dashboard(props: DashboardProps) {
 
       {/* Preview Modal */}
       <Show when={previewFile()}>
-        <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-2 sm:p-4" onClick={closePreview}>
-          <div class="bg-gray-800 rounded-xl max-w-5xl max-h-[calc(100vh-2rem)] w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div
+          class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-2 sm:p-4 sv-modal-overlay"
+          onClick={closePreview}
+        >
+          <div
+            class="bg-gray-800 rounded-xl max-w-5xl max-h-[calc(100vh-2rem)] w-full overflow-hidden sv-modal-panel"
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* Modal Header */}
             <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700">
               <h3 class="text-lg font-medium text-white truncate">{previewFile()?.filename}</h3>
@@ -1473,8 +1542,14 @@ export default function Dashboard(props: DashboardProps) {
 
       {/* Rename Modal */}
       <Show when={renameFile()}>
-        <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setRenameFile(null)}>
-          <div class="bg-gray-800 rounded-xl max-w-md w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div
+          class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 sv-modal-overlay"
+          onClick={() => setRenameFile(null)}
+        >
+          <div
+            class="bg-gray-800 rounded-xl max-w-md w-full overflow-hidden sv-modal-panel"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div class="flex items-center justify-between px-6 py-4 border-b border-gray-700">
               <h3 class="text-lg font-medium text-white">Rename</h3>
               <button
@@ -1516,8 +1591,14 @@ export default function Dashboard(props: DashboardProps) {
 
       {/* Create Folder Modal */}
       <Show when={showCreateFolder()}>
-        <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setShowCreateFolder(false)}>
-          <div class="bg-gray-800 rounded-xl max-w-md w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div
+          class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 sv-modal-overlay"
+          onClick={() => setShowCreateFolder(false)}
+        >
+          <div
+            class="bg-gray-800 rounded-xl max-w-md w-full overflow-hidden sv-modal-panel"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div class="flex items-center justify-between px-6 py-4 border-b border-gray-700">
               <h3 class="text-lg font-medium text-white">Create New Folder</h3>
               <button
@@ -1562,8 +1643,14 @@ export default function Dashboard(props: DashboardProps) {
 
       {/* Move Modal */}
       <Show when={moveFile()}>
-        <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setMoveFile(null)}>
-          <div class="bg-gray-800 rounded-xl max-w-md w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div
+          class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 sv-modal-overlay"
+          onClick={() => setMoveFile(null)}
+        >
+          <div
+            class="bg-gray-800 rounded-xl max-w-md w-full overflow-hidden sv-modal-panel"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div class="flex items-center justify-between px-6 py-4 border-b border-gray-700">
               <h3 class="text-lg font-medium text-white">Move to...</h3>
               <button
@@ -1632,8 +1719,14 @@ export default function Dashboard(props: DashboardProps) {
 
       {/* Bulk Move Modal */}
       <Show when={bulkMoveOpen()}>
-        <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setBulkMoveOpen(false)}>
-          <div class="bg-gray-800 rounded-xl max-w-md w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div
+          class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 sv-modal-overlay"
+          onClick={() => setBulkMoveOpen(false)}
+        >
+          <div
+            class="bg-gray-800 rounded-xl max-w-md w-full overflow-hidden sv-modal-panel"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div class="flex items-center justify-between px-6 py-4 border-b border-gray-700">
               <h3 class="text-lg font-medium text-white">Move {selectedFiles().size} item(s) to...</h3>
               <button

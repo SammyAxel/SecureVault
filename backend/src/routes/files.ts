@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { db, schema } from '../db/index.js';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, sql, inArray } from 'drizzle-orm';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { saveFile, getFile, deleteFile, getStream, getStats } from '../lib/storage.js';
 import { scanFile as virusTotalScan } from '../lib/virustotal.js';
@@ -25,20 +25,34 @@ const moveSchema = z.object({
 });
 
 export async function fileRoutes(app: FastifyInstance): Promise<void> {
-  // Helper: recursively collect all descendants (files + folders)
+  /** All descendants of a folder in one recursive query (avoids N round-trips per tree level). */
   const getAllChildFiles = async (parentId: string): Promise<typeof schema.files.$inferSelect[]> => {
-    const children = await db.query.files.findMany({
-      where: eq(schema.files.parentId, parentId),
-    });
-    
-    let allFiles: typeof schema.files.$inferSelect[] = [...children];
-    for (const child of children) {
-      if (child.isFolder) {
-        const subChildren = await getAllChildFiles(child.id);
-        allFiles = [...allFiles, ...subChildren];
-      }
-    }
-    return allFiles;
+    const idRows = db.all(sql`
+      WITH RECURSIVE descendants AS (
+        SELECT id FROM files WHERE parent_id = ${parentId}
+        UNION ALL
+        SELECT f.id FROM files f INNER JOIN descendants d ON f.parent_id = d.id
+      )
+      SELECT id FROM descendants
+    `) as { id: string }[];
+    if (idRows.length === 0) return [];
+    const ids = idRows.map((r) => r.id);
+    return db.query.files.findMany({ where: inArray(schema.files.id, ids) });
+  };
+
+  /** Breadcrumb chain from root to immediate parent of `file` (single query). */
+  const getParentPathOrdered = (startParentId: string): Array<{ id: string; uid: string | null; name: string }> => {
+    const rows = db.all(sql`
+      WITH RECURSIVE ancestors AS (
+        SELECT id, uid, filename, parent_id, 0 AS depth FROM files WHERE id = ${startParentId}
+        UNION ALL
+        SELECT f.id, f.uid, f.filename, f.parent_id, a.depth + 1
+        FROM files f
+        INNER JOIN ancestors a ON f.id = a.parent_id
+      )
+      SELECT id, uid, filename FROM ancestors ORDER BY depth DESC
+    `) as { id: string; uid: string | null; filename: string }[];
+    return rows.map((r) => ({ id: r.id, uid: r.uid, name: r.filename }));
   };
   
   // ============ LIST FILES ============
@@ -101,18 +115,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       }
     }
     
-    // Get parent path for navigation
-    const getParentPath = async (parentId: string | null): Promise<Array<{ id: string; uid: string | null; name: string }>> => {
-      if (!parentId) return [];
-      const parent = await db.query.files.findFirst({
-        where: eq(schema.files.id, parentId),
-      });
-      if (!parent) return [];
-      const ancestors = await getParentPath(parent.parentId);
-      return [...ancestors, { id: parent.id, uid: parent.uid, name: parent.filename }];
-    };
-    
-    const parentPath = await getParentPath(file.parentId);
+    const parentPath = file.parentId ? getParentPathOrdered(file.parentId) : [];
     
     return {
       ok: true,
@@ -173,9 +176,11 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ ok: false, msg: 'Missing encryption metadata' });
     }
 
-    // Malware scan: VirusTotal and/or Malware Bazaar (when configured)
-    const vtResult = await virusTotalScan(buffer, data.filename, fileHash);
-    const mbResult = await malwareBazaarScan(buffer, data.filename, fileHash);
+    // Malware scan: run independent checks in parallel
+    const [vtResult, mbResult] = await Promise.all([
+      virusTotalScan(buffer, data.filename, fileHash),
+      malwareBazaarScan(buffer, data.filename, fileHash),
+    ]);
 
     if (!vtResult.safe || !mbResult.safe) {
       const msg = !vtResult.safe
@@ -304,10 +309,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     
     // Check ownership or share access
     const file = await db.query.files.findFirst({
-      where: and(
-        eq(schema.files.id, fileId),
-        eq(schema.files.isDeleted, false)
-      ),
+      where: eq(schema.files.id, fileId),
     });
     
     if (!file) {
@@ -318,6 +320,10 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     let encryptedKey = file.encryptedKey;
     
     if (file.ownerId !== user.id) {
+      // Trashed files are only accessible by their owner, not shared recipients
+      if (file.isDeleted) {
+        return reply.status(403).send({ ok: false, msg: 'Access denied' });
+      }
       const share = await db.query.fileShares.findFirst({
         where: and(
           eq(schema.fileShares.fileId, fileId),
@@ -370,14 +376,12 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       const now = new Date();
       const descendants = file.isFolder ? await getAllChildFiles(file.id) : [];
       const toTrash = [file, ...descendants];
-      
-      for (const f of toTrash) {
-        await db.update(schema.files)
+      const trashIds = toTrash.map((f) => f.id);
+      if (trashIds.length > 0) {
+        await db
+          .update(schema.files)
           .set({ isDeleted: true, deletedAt: now })
-          .where(and(
-            eq(schema.files.id, f.id),
-            eq(schema.files.ownerId, user.id)
-          ));
+          .where(and(eq(schema.files.ownerId, user.id), inArray(schema.files.id, trashIds)));
       }
 
       await logAudit(
@@ -446,14 +450,12 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
 
     const descendants = file.isFolder ? await getAllChildFiles(file.id) : [];
     const toRestore = [file, ...descendants];
-
-    for (const f of toRestore) {
-      await db.update(schema.files)
+    const restoreIds = toRestore.map((f) => f.id);
+    if (restoreIds.length > 0) {
+      await db
+        .update(schema.files)
         .set({ isDeleted: false, deletedAt: null })
-        .where(and(
-          eq(schema.files.id, f.id),
-          eq(schema.files.ownerId, user.id)
-        ));
+        .where(and(eq(schema.files.ownerId, user.id), inArray(schema.files.id, restoreIds)));
     }
 
     await logAudit(
@@ -498,6 +500,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         filename: f.filename,
         fileSize: f.fileSize,
         isFolder: f.isFolder,
+        parentId: f.parentId,
         deletedAt: f.deletedAt,
       })),
     };

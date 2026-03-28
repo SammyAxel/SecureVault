@@ -35,3 +35,9 @@ npm-debug.log*
 # Keys (never commit!)
 *_keys.json
 keys.json
+
+# Playwright (seluruh setup frontend — tidak di-commit)
+frontend/playwright.config.ts
+frontend/e2e/
+playwright-report/
+test-results/

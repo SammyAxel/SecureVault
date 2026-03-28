@@ -15,22 +15,24 @@ export default async function notificationRoutes(app: FastifyInstance) {
     const where = unread_only === 'true' 
       ? and(eq(schema.notifications.userId, user.id), eq(schema.notifications.read, false))
       : eq(schema.notifications.userId, user.id);
-    
-    const notifications = await db.query.notifications.findMany({
-      where,
-      orderBy: (notifications: any, { desc }: any) => [desc(notifications.createdAt)],
-      limit: limitNum,
-    });
-    
-    // Get unread count
-    const [unreadResult] = await db
-      .select({ count: count() })
-      .from(schema.notifications)
-      .where(and(
-        eq(schema.notifications.userId, user.id),
-        eq(schema.notifications.read, false)
-      ));
-    
+
+    const unreadWhere = and(
+      eq(schema.notifications.userId, user.id),
+      eq(schema.notifications.read, false)
+    );
+
+    const [notifications, [unreadResult]] = await Promise.all([
+      db.query.notifications.findMany({
+        where,
+        orderBy: (notifications: any, { desc }: any) => [desc(notifications.createdAt)],
+        limit: limitNum,
+      }),
+      db
+        .select({ count: count() })
+        .from(schema.notifications)
+        .where(unreadWhere),
+    ]);
+
     return {
       ok: true,
       notifications,

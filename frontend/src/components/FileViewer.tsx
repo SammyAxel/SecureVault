@@ -2,6 +2,7 @@ import { createSignal, createEffect, Show, For, createMemo } from 'solid-js';
 import { useAuth } from '../stores/auth.jsx';
 import * as api from '../lib/api';
 import type { FileItem } from '../lib/api';
+import { formatSize } from '../lib/format';
 import { toast } from '../stores/toast';
 import { SkeletonFileViewer } from './Skeleton';
 import { CsvPreview, ExcelPreview, WordPreview, TextPreview, getPreviewMimeType, isPreviewableFile } from './FilePreview';
@@ -12,6 +13,8 @@ import {
   unwrapKey,
   base64ToUint8Array,
 } from '../lib/crypto';
+import { ROUTES, hrefWithCurrentSearch } from '../lib/routes';
+import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../lib/motion';
 
 interface FileViewerProps {
   uid: string;
@@ -45,6 +48,7 @@ export default function FileViewer(props: FileViewerProps) {
 
   // Load file/folder by UID
   const loadFileByUid = async (uid: string) => {
+    const started = Date.now();
     setIsLoading(true);
     setError(null);
     setFile(null); // Clear previous file
@@ -85,6 +89,7 @@ export default function FileViewer(props: FileViewerProps) {
         setError(err.message || 'Failed to load');
       }
     } finally {
+      await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
       setIsLoading(false);
     }
   };
@@ -168,12 +173,12 @@ export default function FileViewer(props: FileViewerProps) {
 
   const openItem = (item: FileItem) => {
     if (item.uid) {
-      props.navigate(`/f/${item.uid}`);
+      props.navigate(hrefWithCurrentSearch(`/f/${item.uid}`));
     }
   };
 
   const goToDrive = () => {
-    props.navigate('/');
+    props.navigate(hrefWithCurrentSearch(ROUTES.drive));
   };
 
   // Go back to parent folder
@@ -182,12 +187,12 @@ export default function FileViewer(props: FileViewerProps) {
     if (path.length > 0) {
       const parent = path[path.length - 1];
       if (parent.uid) {
-        props.navigate(`/f/${parent.uid}`);
+        props.navigate(hrefWithCurrentSearch(`/f/${parent.uid}`));
       } else {
-        props.navigate('/');
+        props.navigate(hrefWithCurrentSearch(ROUTES.drive));
       }
     } else {
-      props.navigate('/');
+      props.navigate(hrefWithCurrentSearch(ROUTES.drive));
     }
   };
 
@@ -195,14 +200,6 @@ export default function FileViewer(props: FileViewerProps) {
   const hasParentFolder = () => {
     const path = parentPath();
     return path.length > 0 && path[path.length - 1].uid;
-  };
-
-  const formatSize = (bytes: number) => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
   const formatDate = (dateStr: string) => {
@@ -414,7 +411,7 @@ export default function FileViewer(props: FileViewerProps) {
                       {(p) => (
                         <>
                           <svg class="w-4 h-4 text-gray-600 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" /></svg>
-                          <button onClick={() => p.uid && props.navigate(`/f/${p.uid}`)} class="text-gray-400 hover:text-white text-sm truncate max-w-[140px] sm:max-w-[180px] transition-colors">{p.name}</button>
+                          <button onClick={() => p.uid && props.navigate(hrefWithCurrentSearch(`/f/${p.uid}`))} class="text-gray-400 hover:text-white text-sm truncate max-w-[140px] sm:max-w-[180px] transition-colors">{p.name}</button>
                         </>
                       )}
                     </For>

@@ -1,6 +1,7 @@
 import { createSignal, createEffect, Show, For } from 'solid-js';
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
+import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../lib/motion';
 
 // ============ CSV Preview ============
 export function CsvPreview(props: { url: string }) {
@@ -9,6 +10,7 @@ export function CsvPreview(props: { url: string }) {
   const [loading, setLoading] = createSignal(true);
 
   createEffect(async () => {
+    const started = Date.now();
     try {
       setLoading(true);
       const response = await fetch(props.url);
@@ -21,6 +23,7 @@ export function CsvPreview(props: { url: string }) {
       setError('Failed to load CSV');
       console.error(err);
     } finally {
+      await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
       setLoading(false);
     }
   });
@@ -79,6 +82,7 @@ export function ExcelPreview(props: { url: string }) {
   const [loading, setLoading] = createSignal(true);
 
   createEffect(async () => {
+    const started = Date.now();
     try {
       setLoading(true);
       const response = await fetch(props.url);
@@ -97,6 +101,7 @@ export function ExcelPreview(props: { url: string }) {
       setError('Failed to load Excel file');
       console.error(err);
     } finally {
+      await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
       setLoading(false);
     }
   });
@@ -168,6 +173,7 @@ export function WordPreview(props: { url: string }) {
   const [loading, setLoading] = createSignal(true);
 
   createEffect(async () => {
+    const started = Date.now();
     try {
       setLoading(true);
       const response = await fetch(props.url);
@@ -184,6 +190,7 @@ export function WordPreview(props: { url: string }) {
       setError('Failed to load Word document');
       console.error(err);
     } finally {
+      await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
       setLoading(false);
     }
   });
@@ -217,6 +224,7 @@ export function TextPreview(props: { url: string; filename: string }) {
   const [loading, setLoading] = createSignal(true);
 
   createEffect(async () => {
+    const started = Date.now();
     try {
       setLoading(true);
       const response = await fetch(props.url);
@@ -226,6 +234,7 @@ export function TextPreview(props: { url: string; filename: string }) {
       setError('Failed to load file');
       console.error(err);
     } finally {
+      await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
       setLoading(false);
     }
   });

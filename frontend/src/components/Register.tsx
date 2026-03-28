@@ -4,6 +4,7 @@ import {
   generateKeyBundle,
   downloadKeyBundle,
 } from '../lib/crypto';
+import { awaitMinElapsed, MIN_FORM_SUBMIT_MS } from '../lib/motion';
 
 interface RegisterProps {
   onSwitchToLogin: () => void;
@@ -19,6 +20,7 @@ export default function Register(props: RegisterProps) {
     e.preventDefault();
     setError('');
 
+    const opStart = Date.now();
     setIsLoading(true);
 
     try {
@@ -49,6 +51,7 @@ export default function Register(props: RegisterProps) {
     } catch (err: any) {
       setError(err.message || 'Registration failed');
     } finally {
+      await awaitMinElapsed(opStart, MIN_FORM_SUBMIT_MS);
       setIsLoading(false);
     }
   };
@@ -56,7 +59,7 @@ export default function Register(props: RegisterProps) {
   if (success()) {
     return (
       <div class="max-w-md mx-auto mt-8 sm:mt-16 px-3 sm:px-0">
-        <div class="bg-gray-800 rounded-xl p-4 sm:p-8 shadow-xl text-center">
+        <div class="bg-gray-800 rounded-xl p-4 sm:p-8 shadow-xl text-center animate-sv-rise">
           <div class="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg class="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
@@ -85,7 +88,7 @@ export default function Register(props: RegisterProps) {
 
   return (
     <div class="max-w-md mx-auto mt-8 sm:mt-16 px-3 sm:px-0">
-      <div class="bg-gray-800 rounded-xl p-4 sm:p-8 shadow-xl">
+      <div class="bg-gray-800 rounded-xl p-4 sm:p-8 shadow-xl animate-sv-rise">
         <h2 class="text-xl sm:text-2xl font-bold text-center mb-6">Create Account</h2>
 
         {error() && (

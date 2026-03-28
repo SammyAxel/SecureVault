@@ -21,15 +21,27 @@ export default function ConfirmModal() {
   return (
     <Show when={confirmState()}>
       {(state) => (
-        <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-[90] p-4 sm:p-0">
-          <div class="bg-gray-800 rounded-xl p-4 sm:p-6 max-w-md w-full mx-0 sm:mx-4 border border-gray-700 shadow-xl max-h-[90vh] overflow-y-auto">
+        <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-[90] p-4 sm:p-0 sv-modal-overlay">
+          <div class="bg-gray-800 rounded-xl p-4 sm:p-6 max-w-md w-full mx-0 sm:mx-4 border border-gray-700 shadow-xl max-h-[90vh] overflow-y-auto sv-modal-panel">
             {/* Header */}
             <div class="flex items-center gap-3 mb-4">
-              <div class={`w-10 h-10 rounded-full flex items-center justify-center ${
-                state().type === 'danger' ? 'bg-red-600/20' : 'bg-yellow-600/20'
-              }`}>
-                <svg 
-                  class={`w-5 h-5 ${state().type === 'danger' ? 'text-red-400' : 'text-yellow-400'}`}
+              <div
+                class={`w-10 h-10 rounded-full flex items-center justify-center ${
+                  state().type === 'danger'
+                    ? 'bg-red-600/20'
+                    : state().type === 'info'
+                      ? 'bg-blue-600/20'
+                      : 'bg-yellow-600/20'
+                }`}
+              >
+                <svg
+                  class={`w-5 h-5 ${
+                    state().type === 'danger'
+                      ? 'text-red-400'
+                      : state().type === 'info'
+                        ? 'text-blue-400'
+                        : 'text-yellow-400'
+                  }`}
                   fill="none" 
                   stroke="currentColor" 
                   viewBox="0 0 24 24"
@@ -63,9 +75,13 @@ export default function ConfirmModal() {
               <button
                 onClick={handleConfirm}
                 class={`px-4 py-2 rounded-lg transition-colors ${
-                  state().type === 'danger'
-                    ? 'bg-red-600 hover:bg-red-700 text-white'
-                    : 'bg-primary-600 hover:bg-primary-700 text-white'
+                  state().confirmButtonClass
+                    ? `${state().confirmButtonClass} text-white`
+                    : state().type === 'danger'
+                      ? 'bg-red-600 hover:bg-red-700 text-white'
+                      : state().type === 'info'
+                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                        : 'bg-primary-600 hover:bg-primary-700 text-white'
                 }`}
               >
                 {state().confirmText || 'Confirm'}

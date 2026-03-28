@@ -8,6 +8,7 @@ import {
   generateKeyBundle,
   downloadKeyBundle,
 } from '../lib/crypto';
+import { awaitMinElapsed, MIN_CONTENT_LOAD_MS, MIN_FORM_SUBMIT_MS } from '../lib/motion';
 
 interface ProfileProps {
   onBack: () => void;
@@ -19,6 +20,18 @@ type ProfileTab = 'general' | 'security' | 'sessions' | 'danger';
 export default function Profile(props: ProfileProps) {
   const { user, updateUser, logout } = useAuth();
   const [activeTab, setActiveTab] = createSignal<ProfileTab>('general');
+  const [tabVisible, setTabVisible] = createSignal(true);
+  let tabTimeout: ReturnType<typeof setTimeout> | undefined;
+
+  const switchTab = (tab: ProfileTab) => {
+    if (tab === activeTab()) return;
+    if (tabTimeout) clearTimeout(tabTimeout);
+    setTabVisible(false);
+    tabTimeout = setTimeout(() => {
+      setActiveTab(tab);
+      requestAnimationFrame(() => setTabVisible(true));
+    }, 200);
+  };
 
   return (
     <div class="max-w-4xl mx-auto px-0 sm:px-0">
@@ -40,7 +53,7 @@ export default function Profile(props: ProfileProps) {
       <div class="flex gap-2 mb-6 border-b border-gray-700 overflow-x-auto overflow-y-hidden flex-nowrap min-w-0 -mx-px">
         <TabButton 
           active={activeTab() === 'general'} 
-          onClick={() => setActiveTab('general')}
+          onClick={() => switchTab('general')}
           icon={<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
           </svg>}
@@ -49,7 +62,7 @@ export default function Profile(props: ProfileProps) {
         </TabButton>
         <TabButton 
           active={activeTab() === 'security'} 
-          onClick={() => setActiveTab('security')}
+          onClick={() => switchTab('security')}
           icon={<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>}
@@ -58,7 +71,7 @@ export default function Profile(props: ProfileProps) {
         </TabButton>
         <TabButton 
           active={activeTab() === 'sessions'} 
-          onClick={() => setActiveTab('sessions')}
+          onClick={() => switchTab('sessions')}
           icon={<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
           </svg>}
@@ -67,7 +80,7 @@ export default function Profile(props: ProfileProps) {
         </TabButton>
         <TabButton 
           active={activeTab() === 'danger'} 
-          onClick={() => setActiveTab('danger')}
+          onClick={() => switchTab('danger')}
           icon={<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>}
@@ -77,19 +90,21 @@ export default function Profile(props: ProfileProps) {
         </TabButton>
       </div>
 
-      {/* Tab Content */}
-      <Show when={activeTab() === 'general'}>
-        <GeneralTab />
-      </Show>
-      <Show when={activeTab() === 'security'}>
-        <SecurityTab />
-      </Show>
-      <Show when={activeTab() === 'sessions'}>
-        <SessionsTab />
-      </Show>
-      <Show when={activeTab() === 'danger'}>
-        <DangerTab onLogout={logout} />
-      </Show>
+      {/* Tab Content — animated fade+rise between panels */}
+      <div class={`sv-tab-panel${tabVisible() ? '' : ' sv-tab-panel-out'}`}>
+        <Show when={activeTab() === 'general'}>
+          <GeneralTab />
+        </Show>
+        <Show when={activeTab() === 'security'}>
+          <SecurityTab />
+        </Show>
+        <Show when={activeTab() === 'sessions'}>
+          <SessionsTab />
+        </Show>
+        <Show when={activeTab() === 'danger'}>
+          <DangerTab onLogout={logout} />
+        </Show>
+      </div>
     </div>
   );
 }
@@ -105,7 +120,7 @@ function TabButton(props: {
   return (
     <button
       onClick={props.onClick}
-      class={`flex items-center gap-2 px-4 py-3 border-b-2 transition-colors ${
+      class={`flex items-center gap-2 px-4 py-3 border-b-2 transition-all duration-200 ease-out ${
         props.active
           ? props.danger 
             ? 'border-red-500 text-red-400' 
@@ -171,6 +186,7 @@ function GeneralTab() {
   };
 
   const handleSave = async () => {
+    const opStart = Date.now();
     setIsLoading(true);
     try {
       await api.updateProfile({
@@ -187,6 +203,7 @@ function GeneralTab() {
     } catch (err: any) {
       toast.error(err.message || 'Failed to update profile');
     } finally {
+      await awaitMinElapsed(opStart, MIN_FORM_SUBMIT_MS);
       setIsLoading(false);
     }
   };
@@ -606,6 +623,7 @@ function SessionsTab() {
   });
 
   const loadSessions = async () => {
+    const started = Date.now();
     setIsLoading(true);
     try {
       const result = await api.getSessions();
@@ -613,6 +631,7 @@ function SessionsTab() {
     } catch (err: any) {
       toast.error('Failed to load sessions');
     } finally {
+      await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
       setIsLoading(false);
     }
   };

@@ -11,6 +11,37 @@ body {
   overflow-x: hidden;
 }
 
+/* Fluid interaction defaults (respect reduced motion below) */
+@media (prefers-reduced-motion: no-preference) {
+  a:not(.sv-no-motion),
+  button:not([disabled]):not(.sv-no-motion),
+  [role='button']:not([disabled]):not(.sv-no-motion),
+  summary:not(.sv-no-motion),
+  input:not(.sv-no-motion):not([type='checkbox']):not([type='radio']),
+  textarea:not(.sv-no-motion),
+  select:not(.sv-no-motion) {
+    transition-property: transform, background-color, border-color, color, box-shadow, opacity, filter;
+    transition-duration: 0.28s;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  button:not([disabled]):not(.sv-no-motion):active,
+  [role='button']:not([disabled]):not(.sv-no-motion):active,
+  summary:not(.sv-no-motion):active {
+    transform: scale(0.985);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* Improve tap targets on touch devices (optional; use min-h-11 / py-3 on key buttons) */
 @media (hover: none) and (pointer: coarse) {
   .touch-target {
@@ -88,7 +119,119 @@ input[type='checkbox'] {
 }
 
 .animate-slide-in {
-  animation: slide-in 0.3s ease-out;
+  animation: slide-in 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Main panels / auth cards */
+@keyframes sv-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-sv-rise {
+  animation: sv-rise 0.58s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Staggered list / grid entrance (add class on container) */
+@media (prefers-reduced-motion: no-preference) {
+  .sv-stagger-children > * {
+    animation: sv-rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .sv-stagger-children > *:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .sv-stagger-children > *:nth-child(2) {
+    animation-delay: 35ms;
+  }
+  .sv-stagger-children > *:nth-child(3) {
+    animation-delay: 70ms;
+  }
+  .sv-stagger-children > *:nth-child(4) {
+    animation-delay: 105ms;
+  }
+  .sv-stagger-children > *:nth-child(5) {
+    animation-delay: 140ms;
+  }
+  .sv-stagger-children > *:nth-child(6) {
+    animation-delay: 175ms;
+  }
+  .sv-stagger-children > *:nth-child(7) {
+    animation-delay: 210ms;
+  }
+  .sv-stagger-children > *:nth-child(8) {
+    animation-delay: 245ms;
+  }
+  .sv-stagger-children > *:nth-child(n + 9) {
+    animation-delay: 280ms;
+  }
+}
+
+/* Modals */
+@keyframes sv-modal-bg {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sv-modal-panel {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.sv-modal-overlay {
+  animation: sv-modal-bg 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.sv-modal-panel {
+  animation: sv-modal-panel 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Route / content cross-fade helper (opacity driven from JS) */
+.sv-route-shell {
+  transition: opacity 0.44s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.44s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.sv-route-shell-entering {
+  transform: translateY(6px);
+}
+
+/* Tab panel – fade + rise on enter, fade + sink on exit */
+@media (prefers-reduced-motion: no-preference) {
+  .sv-tab-panel {
+    transition: opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+                transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: opacity, transform;
+  }
+  .sv-tab-panel-out {
+    opacity: 0 !important;
+    transform: translateY(6px) !important;
+    pointer-events: none;
+  }
+}
+/* Reduced-motion: instant swap, no panel animation */
+@media (prefers-reduced-motion: reduce) {
+  .sv-tab-panel {
+    transition: none;
+  }
+  .sv-tab-panel-out {
+    opacity: 0 !important;
+    pointer-events: none;
+  }
 }
 
 /* Profile dropdown */
@@ -104,7 +247,7 @@ input[type='checkbox'] {
 }
 
 .animate-dropdown-in {
-  animation: dropdown-in 0.2s ease-out;
+  animation: dropdown-in 0.24s ease-out;
 }
 
 @keyframes dropdown-out {
@@ -119,7 +262,7 @@ input[type='checkbox'] {
 }
 
 .animate-dropdown-out {
-  animation: dropdown-out 0.2s ease-out forwards;
+  animation: dropdown-out 0.24s ease-out forwards;
 }
 
 /* Avatar cropper: circular crop preview */

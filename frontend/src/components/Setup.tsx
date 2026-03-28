@@ -4,6 +4,7 @@ import {
   generateKeyBundle,
   downloadKeyBundle,
 } from '../lib/crypto';
+import { awaitMinElapsed, MIN_FORM_SUBMIT_MS } from '../lib/motion';
 
 interface SetupProps {
   onComplete: () => void;
@@ -31,6 +32,7 @@ export default function Setup(props: SetupProps) {
       return;
     }
 
+    const opStart = Date.now();
     setIsLoading(true);
 
     try {
@@ -52,6 +54,7 @@ export default function Setup(props: SetupProps) {
     } catch (err: any) {
       setError(err.message || 'Setup failed');
     } finally {
+      await awaitMinElapsed(opStart, MIN_FORM_SUBMIT_MS);
       setIsLoading(false);
     }
   };
@@ -71,7 +74,7 @@ export default function Setup(props: SetupProps) {
             <p class="text-gray-400 text-lg">End-to-End Encrypted File Storage</p>
           </div>
 
-          <div class="bg-gray-800 rounded-xl p-8 shadow-xl">
+          <div class="bg-gray-800 rounded-xl p-8 shadow-xl animate-sv-rise">
             <h2 class="text-xl font-semibold mb-4">🚀 First-Time Setup</h2>
             
             <div class="space-y-4 text-gray-300 mb-6">
