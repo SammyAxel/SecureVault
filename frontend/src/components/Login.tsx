@@ -18,7 +18,7 @@ interface LoginProps {
 export default function Login(props: LoginProps) {
   const { login } = useAuth();
   const [username, setUsername] = createSignal('');
-  const [keyFile, setKeyFile] = createSignal<File | null>(null);
+  const [, setKeyFile] = createSignal<File | null>(null);
   const [keyBundle, setKeyBundle] = createSignal<KeyBundle | null>(null);
   const [totp, setTotp] = createSignal('');
   const [requires2FA, setRequires2FA] = createSignal(false);
@@ -140,21 +140,28 @@ export default function Login(props: LoginProps) {
 
         <form onSubmit={requires2FA() && challengeData() ? handleSubmit2FA : handleLogin}>
           <div class="mb-4">
-            <label class="block text-gray-400 text-sm mb-2">Username</label>
+            <label for="login-username" class="block text-gray-400 text-sm mb-2">
+              Username
+            </label>
             <input
+              id="login-username"
               type="text"
               value={username()}
               onInput={(e) => setUsername(e.currentTarget.value)}
               class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500"
               placeholder="Enter your username"
+              autocomplete="username"
               required
               disabled={requires2FA() && !!challengeData()}
             />
           </div>
 
           <div class="mb-4">
-            <label class="block text-gray-400 text-sm mb-2">Key File (keys.json)</label>
+            <label for="login-keyfile" class="block text-gray-400 text-sm mb-2">
+              Key File (keys.json)
+            </label>
             <input
+              id="login-keyfile"
               type="file"
               accept=".json"
               onChange={handleKeyFileChange}
@@ -175,9 +182,14 @@ export default function Login(props: LoginProps) {
           {requires2FA() && challengeData() && (
             <>
               <div class="mb-4">
-                <label class="block text-gray-400 text-sm mb-2">2FA Code</label>
+                <label for="login-totp" class="block text-gray-400 text-sm mb-2">
+                  2FA Code
+                </label>
                 <input
+                  id="login-totp"
                   type="text"
+                  inputmode="numeric"
+                  autocomplete="one-time-code"
                   value={totp()}
                   onInput={(e) => setTotp(e.currentTarget.value)}
                   class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500 text-center text-2xl tracking-widest"

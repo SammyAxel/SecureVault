@@ -1,18 +1,21 @@
 import { createSignal, createEffect, createMemo, For, Show, onCleanup } from 'solid-js';
-import { useAuth } from '../stores/auth.jsx';
-import * as api from '../lib/api';
-import { ApiError } from '../lib/api';
-import type { FileItem } from '../lib/api';
-import { formatSize } from '../lib/format';
-import ShareModal from './ShareModal';
-import NotificationCenter from './NotificationCenter';
-import Breadcrumb from './Breadcrumb';
-import { toast } from '../stores/toast';
-import { ROUTES, hrefWithCurrentSearch } from '../lib/routes';
-import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../lib/motion';
-import { openConfirm } from '../stores/confirm';
-import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile, getFileExtension } from './FilePreview';
-import { SkeletonDashboard } from './Skeleton';
+import { useAuth } from '../../stores/auth.jsx';
+import * as api from '../../lib/api';
+import { ApiError } from '../../lib/api';
+import type { FileItem } from '../../lib/api';
+import { formatSize } from '../../lib/format';
+import ShareModal from '../ShareModal';
+import NotificationCenter from '../NotificationCenter';
+import Breadcrumb from '../Breadcrumb';
+import { toast } from '../../stores/toast';
+import { ROUTES, hrefWithCurrentSearch } from '../../lib/routes';
+import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../../lib/motion';
+import { getFileExtension } from '../../lib/files';
+import { logger } from '../../lib/logger';
+import { openConfirm } from '../../stores/confirm';
+import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile } from '../FilePreview';
+import { SkeletonDashboard } from '../Skeleton';
+import DashboardTextPreview from './DashboardTextPreview';
 import {
   getCurrentKeys,
   importEncryptionPrivateKey,
@@ -23,7 +26,7 @@ import {
   unwrapKey,
   base64ToUint8Array,
   arrayBufferToBase64,
-} from '../lib/crypto';
+} from '../../lib/crypto';
 
 // Helper to get MIME type from filename
 function getMimeType(filename: string): string {
@@ -53,7 +56,7 @@ interface DashboardProps {
 }
 
 export default function Dashboard(props: DashboardProps) {
-  const { user, updateUser } = useAuth();
+  const { updateUser } = useAuth();
   const [files, setFiles] = createSignal<FileItem[]>([]);
   const [currentFolder, setCurrentFolder] = createSignal<string | null>(null);
   const [currentFolderUid, setCurrentFolderUid] = createSignal<string | null>(null);
@@ -112,7 +115,7 @@ export default function Dashboard(props: DashboardProps) {
   // File type detection helpers
   const getFileCategory = (filename: string, isFolder: boolean): string => {
     if (isFolder) return 'folders';
-    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    const ext = getFileExtension(filename);
     const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'];
     const videoExts = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'];
     const audioExts = ['mp3', 'wav', 'flac', 'm4a', 'ogg', 'aac'];
@@ -223,7 +226,7 @@ export default function Dashboard(props: DashboardProps) {
         return;
       }
     } catch (error) {
-      console.error('Failed to load files:', error);
+      logger.error('Failed to load files:', error);
     } finally {
       await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
       setIsLoading(false);
@@ -376,7 +379,7 @@ export default function Dashboard(props: DashboardProps) {
         setUploadProgress(`Calculating hash ${file.name}...`);
         
         // Calculate hash of original file (before encryption) for VirusTotal scanning
-        const { calculateFileHash } = await import('../lib/crypto');
+        const { calculateFileHash } = await import('../../lib/crypto');
         const fileHash = await calculateFileHash(arrayBuffer);
 
         setUploadProgress(`Encrypting ${file.name}...`);
@@ -404,7 +407,7 @@ export default function Dashboard(props: DashboardProps) {
         loadFiles();
         await refreshStorage();
       } catch (error: any) {
-        console.error('Upload failed:', error);
+        logger.error('Upload failed:', error);
         if (error?.data?.quotaExceeded) {
           toast.error(error.message); // e.g. "Storage quota exceeded. You have X bytes remaining."
         } else if (error?.data?.malwareDetected) {
@@ -454,7 +457,7 @@ export default function Dashboard(props: DashboardProps) {
 
       setUploadProgress(null);
     } catch (error: any) {
-      console.error('Download failed:', error);
+      logger.error('Download failed:', error);
       toast.error(`Failed to download: ${error.message}`);
       setUploadProgress(null);
     }
@@ -495,7 +498,7 @@ export default function Dashboard(props: DashboardProps) {
       }
       setUploadProgress(null);
     } catch (error: any) {
-      console.error('Open failed:', error);
+      logger.error('Open failed:', error);
       toast.error(`Failed to open: ${error.message}`);
       setUploadProgress(null);
     }
@@ -549,7 +552,7 @@ export default function Dashboard(props: DashboardProps) {
       await navigator.clipboard.writeText(url);
       toast.success('Link copied to clipboard!');
     } catch (error: any) {
-      console.error('Failed to copy UID link:', error);
+      logger.error('Failed to copy UID link:', error);
       toast.error(`Failed to copy link: ${error.message}`);
     }
   };
@@ -1525,7 +1528,7 @@ export default function Dashboard(props: DashboardProps) {
                 (previewFile()?.mimeType.startsWith('text/') && previewFile()?.mimeType !== 'text/csv') || 
                 previewFile()?.mimeType === 'application/json'
               }>
-                <TextPreview url={previewFile()!.url} />
+                <DashboardTextPreview url={previewFile()!.url} />
               </Show>
             </div>
           </div>
@@ -1793,26 +1796,5 @@ export default function Dashboard(props: DashboardProps) {
         </div>
       </Show>
     </div>
-  );
-}
-
-// Text preview component
-function TextPreview(props: { url: string }) {
-  const [content, setContent] = createSignal<string>('Loading...');
-  
-  createEffect(async () => {
-    try {
-      const response = await fetch(props.url);
-      const text = await response.text();
-      setContent(text);
-    } catch {
-      setContent('Failed to load text content');
-    }
-  });
-  
-  return (
-    <pre class="bg-gray-900 p-4 rounded-lg overflow-auto max-h-[70vh] text-sm text-gray-300 font-mono whitespace-pre-wrap">
-      {content()}
-    </pre>
   );
 }

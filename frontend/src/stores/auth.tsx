@@ -1,6 +1,8 @@
 import { createContext, createSignal, useContext, ParentComponent, onMount, onCleanup } from 'solid-js';
 import { clearCurrentKeys } from '../lib/crypto';
 import { awaitMinElapsed, MIN_BOOTSTRAP_MS } from '../lib/motion';
+import { getCurrentUser, logout as apiLogout } from '../lib/api';
+import { logger } from '../lib/logger';
 import { toast } from './toast';
 
 export interface User {
@@ -49,7 +51,7 @@ export const AuthProvider: ParentComponent = (props) => {
     // Only set timer if user is logged in
     if (user()) {
       inactivityTimer = setTimeout(() => {
-        console.log('Auto-logout due to inactivity');
+        logger.debug('Auto-logout due to inactivity');
         logout();
         // Persistent toast (duration 0 = stays until user dismisses)
         toast.info('You have been logged out due to inactivity. Please sign in again.', 0);
@@ -77,20 +79,11 @@ export const AuthProvider: ParentComponent = (props) => {
     const savedToken = localStorage.getItem('securevault_token');
     if (savedToken) {
       try {
-        const response = await fetch('/api/me', {
-          headers: { Authorization: `Bearer ${savedToken}` },
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          setToken(savedToken);
-          setUser(data.user);
-          resetInactivityTimer();
-        } else {
-          localStorage.removeItem('securevault_token');
-        }
-      } catch (error) {
-        console.error('Session check failed:', error);
+        const data = await getCurrentUser();
+        setToken(savedToken);
+        setUser(data.user);
+        resetInactivityTimer();
+      } catch {
         localStorage.removeItem('securevault_token');
       }
     }
@@ -132,12 +125,9 @@ export const AuthProvider: ParentComponent = (props) => {
     const currentToken = token();
     if (currentToken) {
       try {
-        await fetch('/api/logout', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${currentToken}` },
-        });
-      } catch (error) {
-        console.error('Logout failed:', error);
+        await apiLogout();
+      } catch {
+        /* still clear local session */
       }
     }
     

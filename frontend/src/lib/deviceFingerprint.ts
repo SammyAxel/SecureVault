@@ -71,8 +71,7 @@ export function getDeviceInfo(): Omit<DeviceInfo, 'fingerprint'> {
   
   const browser = result.browser.name || 'Unknown Browser';
   const os = result.os.name || 'Unknown OS';
-  const deviceType = result.device.type || 'desktop';
-  
+
   // Create a friendly device name
   const deviceName = `${browser} on ${os}`;
   

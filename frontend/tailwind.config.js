@@ -17,6 +17,17 @@ export default {
           900: '#0c4a6e',
           950: '#082f49',
         },
+        /** Semantic neutrals for cards/modals (prefer these in new UI). */
+        vault: {
+          canvas: '#0a0a0b',
+          panel: '#1f2937',
+          'panel-muted': 'rgba(31, 41, 55, 0.6)',
+          border: '#374151',
+          'border-strong': '#4b5563',
+        },
+      },
+      boxShadow: {
+        'vault-float': '0 25px 50px -12px rgba(0, 0, 0, 0.45)',
       },
     },
   },

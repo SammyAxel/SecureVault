@@ -1,14 +1,25 @@
-import { createSignal, Show, createEffect, createMemo, onMount, onCleanup, untrack } from 'solid-js';
+import {
+  createSignal,
+  Show,
+  createEffect,
+  createMemo,
+  onMount,
+  onCleanup,
+  untrack,
+  lazy,
+  Suspense,
+} from 'solid-js';
 import { AuthProvider, useAuth } from './stores/auth.jsx';
 import Login from './components/Login';
 import Register from './components/Register';
-import Dashboard from './components/Dashboard';
-import Profile from './components/Profile';
-import AdminDashboard from './components/AdminDashboard';
 import Setup from './components/Setup';
 import ToastContainer from './components/Toast';
 import ConfirmModal from './components/ConfirmModal';
-import PublicShare from './components/PublicShare';
+
+const Dashboard = lazy(() => import('./components/dashboard/Dashboard'));
+const Profile = lazy(() => import('./components/profile/Profile'));
+const AdminDashboard = lazy(() => import('./components/admin/AdminDashboard'));
+const PublicShare = lazy(() => import('./components/share/PublicShare'));
 import Sidebar from './components/Sidebar';
 import Home from './components/Home';
 import * as api from './lib/api';
@@ -25,42 +36,18 @@ import {
   hrefWithCurrentSearch,
 } from './lib/routes';
 import { awaitMinElapsed, MIN_SETUP_WIZARD_MS, MIN_SEARCH_FEEDBACK_MS } from './lib/motion';
+import { logger } from './lib/logger';
+import { useRoute } from './lib/useRoute';
 
-function syncLocationToSignals(
-  setPath: (p: string) => void,
-  setSearch: (s: string) => void,
-  href: string
-) {
-  const url = new URL(href, window.location.origin);
-  setPath(url.pathname);
-  setSearch(url.search);
-}
-
-// Path + query routing (pathname and `?q=` for search)
-function useRoute() {
-  const [path, setPath] = createSignal(window.location.pathname);
-  const [locationSearch, setLocationSearch] = createSignal(window.location.search);
-
-  createEffect(() => {
-    const handlePopState = () => {
-      setPath(window.location.pathname);
-      setLocationSearch(window.location.search);
-    };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  });
-
-  const navigate = (newHref: string) => {
-    window.history.pushState({}, '', newHref);
-    syncLocationToSignals(setPath, setLocationSearch, newHref);
-  };
-
-  const replacePath = (newHref: string) => {
-    window.history.replaceState({}, '', newHref);
-    syncLocationToSignals(setPath, setLocationSearch, newHref);
-  };
-
-  return { path, locationSearch, navigate, replacePath };
+function LazyRouteFallback() {
+  return (
+    <div class="flex items-center justify-center min-h-[40vh] text-gray-400 animate-sv-rise">
+      <div class="flex flex-col items-center gap-3">
+        <div class="animate-spin rounded-full h-10 w-10 border-2 border-primary-500/30 border-t-primary-500" />
+        <span class="text-sm">Loading…</span>
+      </div>
+    </div>
+  );
 }
 
 function AppContent() {
@@ -223,7 +210,7 @@ function AppContent() {
         const status = await api.checkSetupStatus();
         setNeedsSetup(status.needsSetup);
       } catch (err) {
-        console.error('Failed to check setup status:', err);
+        logger.error('Failed to check setup status:', err);
         setNeedsSetup(false);
       } finally {
         await awaitMinElapsed(started, MIN_SETUP_WIZARD_MS);
@@ -384,12 +371,16 @@ function AppContent() {
               >
                 {/* Profile Page */}
                 <Show when={isProfilePage()}>
-                  <Profile onBack={() => window.history.back()} />
+                  <Suspense fallback={<LazyRouteFallback />}>
+                    <Profile onBack={() => window.history.back()} />
+                  </Suspense>
                 </Show>
 
                 {/* Admin Dashboard */}
                 <Show when={isAdminPage() && user()?.isAdmin && !isProfilePage()}>
-                  <AdminDashboard />
+                  <Suspense fallback={<LazyRouteFallback />}>
+                    <AdminDashboard />
+                  </Suspense>
                 </Show>
 
                 {/* Drive shell (Sidebar + content) */}
@@ -406,29 +397,31 @@ function AppContent() {
                       <Show
                         when={activeDriveSection() === 'home'}
                         fallback={
-                          <Dashboard
-                            navigate={navigate}
-                            replaceHref={replacePath}
-                            uid={getUIDFromPath()}
-                            section={activeDriveSection() as 'drive' | 'shared' | 'trash'}
-                            onRequestNavigateRoot={() =>
-                              navigate(hrefWithCurrentSearch(ROUTES.drive))
-                            }
-                            globalSearch={searchApplied()}
-                            clearVaultSearch={clearVaultSearch}
-                            searchLoading={searchLoading()}
-                          />
+                          <Suspense fallback={<LazyRouteFallback />}>
+                            <Dashboard
+                              navigate={navigate}
+                              replaceHref={replacePath}
+                              uid={getUIDFromPath()}
+                              section={activeDriveSection() as 'drive' | 'shared' | 'trash'}
+                              onRequestNavigateRoot={() =>
+                                navigate(hrefWithCurrentSearch(ROUTES.drive))
+                              }
+                              globalSearch={searchApplied()}
+                              clearVaultSearch={clearVaultSearch}
+                              searchLoading={searchLoading()}
+                            />
+                          </Suspense>
                         }
                       >
                         <Home
                           search={searchApplied()}
                           searchLoading={searchLoading()}
-                          onOpenFolder={(id, name, uid) => {
+                          onOpenFolder={(_folderId, _folderName, uid) => {
                             navigate(hrefWithCurrentSearch(uid ? `/f/${uid}` : ROUTES.drive));
                           }}
                           onOpenFile={(file) => {
-                            if ((file as any).uid) {
-                              navigate(hrefWithCurrentSearch(`/f/${(file as any).uid}`));
+                            if (file.uid) {
+                              navigate(hrefWithCurrentSearch(`/f/${file.uid}`));
                             }
                           }}
                           onDownloadFile={() => {}}
@@ -583,7 +576,11 @@ export default function App() {
   
   // Render public share page
   if (isShareRoute()) {
-    return <PublicShare />;
+    return (
+      <Suspense fallback={<LazyRouteFallback />}>
+        <PublicShare />
+      </Suspense>
+    );
   }
   
   return (

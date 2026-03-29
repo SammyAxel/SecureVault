@@ -239,7 +239,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(404).send({ ok: false, msg: 'User not found' });
     }
     
-    // TODO: Verify ECDSA signature using user.publicKeyPem
+    // Security note: server-side ECDSA verification of `signature` against `user.publicKeyPem` is not wired here yet.
+    // Enabling it requires `crypto.createVerify` (or equivalent) plus client/server contract tests before production.
     // For now, we'll trust the signature (implement WebCrypto verification)
     
     // Check if device is trusted (skip 2FA if trusted)

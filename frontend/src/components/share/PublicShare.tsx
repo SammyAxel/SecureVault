@@ -1,8 +1,16 @@
 import { createSignal, createEffect, Show, For, onMount, createMemo } from 'solid-js';
-import { formatSize } from '../lib/format';
-import { ROUTES } from '../lib/routes';
-import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../lib/motion';
-import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile } from './FilePreview';
+import { formatSize } from '../../lib/format';
+import { ROUTES } from '../../lib/routes';
+import { publicRequestJson, publicRequestRaw, ApiError } from '../../lib/api';
+import { getFileExtension } from '../../lib/files';
+import { logger } from '../../lib/logger';
+import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../../lib/motion';
+import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile } from '../FilePreview';
+import {
+  base64ToArrayBuffer,
+  importFileKey,
+  decryptSharedFile,
+} from './publicShareCrypto';
 
 interface SharedFile {
   id: string;
@@ -27,35 +35,6 @@ interface SharedFolder {
   id: string;
   filename: string;
   children: FolderItem[];
-}
-
-// Crypto utilities (inline to avoid circular dependencies)
-function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
-}
-
-async function importFileKey(rawKeyBase64: string): Promise<CryptoKey> {
-  const keyData = base64ToArrayBuffer(rawKeyBase64);
-  return crypto.subtle.importKey(
-    'raw',
-    keyData,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['decrypt']
-  );
-}
-
-async function decryptFile(encrypted: ArrayBuffer, key: CryptoKey, iv: Uint8Array): Promise<ArrayBuffer> {
-  return crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: iv as unknown as BufferSource },
-    key,
-    encrypted
-  );
 }
 
 export default function PublicShare() {
@@ -156,12 +135,15 @@ export default function PublicShare() {
       }
 
       try {
-        const response = await fetch(`/api/public/${token}`);
-        const data = await response.json();
+        type PublicMeta = {
+          isFolder?: boolean;
+          folder?: { id: string; filename?: string; children?: FolderItem[] };
+          file?: SharedFile;
+          msg?: string;
+        };
+        const data = await publicRequestJson<PublicMeta>(`/public/${token}`);
 
-        if (!response.ok) {
-          setError(data.msg || 'Link not found or expired');
-        } else if (data.isFolder) {
+        if (data.isFolder) {
           // It's a folder share - ensure we always have folder object with children array
           setIsFolder(true);
           const folderData = data.folder;
@@ -177,15 +159,18 @@ export default function PublicShare() {
         } else {
           // It's a single file share
           setIsFolder(false);
-          setFile(data.file);
-
-          // Auto-load preview for previewable files if we have the key
-          if (fragment && isPreviewable(data.file.filename)) {
-            loadPreview(fragment.key, fragment.iv, data.file.filename);
+          const sharedFile = data.file;
+          if (!sharedFile) {
+            setError('Invalid share data');
+          } else {
+            setFile(sharedFile);
+            if (fragment && isPreviewable(sharedFile.filename)) {
+              loadPreview(fragment.key, fragment.iv, sharedFile.filename);
+            }
           }
         }
       } catch (err) {
-        setError('Failed to load shared content');
+        setError(err instanceof ApiError ? err.message : 'Failed to load shared content');
       } finally {
         await awaitMinElapsed(t0, MIN_CONTENT_LOAD_MS);
         setIsLoading(false);
@@ -200,16 +185,11 @@ export default function PublicShare() {
     setIsLoadingPreview(true);
 
     try {
-      const response = await fetch(`/api/public/${token}/download`);
-      
-      if (!response.ok) {
-        throw new Error('Failed to load preview');
-      }
-      
+      const response = await publicRequestRaw(`/public/${token}/download`);
       const encryptedData = await response.arrayBuffer();
       const cryptoKey = await importFileKey(key);
       const ivBytes = new Uint8Array(base64ToArrayBuffer(iv));
-      const decryptedData = await decryptFile(encryptedData, cryptoKey, ivBytes);
+      const decryptedData = await decryptSharedFile(encryptedData, cryptoKey, ivBytes);
       
       const mimeType = getMimeType(filename);
       setPreviewMimeType(mimeType);
@@ -225,7 +205,7 @@ export default function PublicShare() {
         setPreviewUrl(url);
       }
     } catch (err) {
-      console.error('Preview error:', err);
+      logger.error('Preview error:', err);
       // Don't show error, just don't show preview
     } finally {
       await awaitMinElapsed(t0, MIN_CONTENT_LOAD_MS);
@@ -266,13 +246,8 @@ export default function PublicShare() {
         return;
       }
       
-      const response = await fetch(`/api/public/${token}/download`);
-      
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.msg || 'Download failed');
-      }
-      
+      const response = await publicRequestRaw(`/public/${token}/download`);
+
       let blob: Blob;
       const key = decryptionKey();
       const iv = decryptionIv();
@@ -281,7 +256,7 @@ export default function PublicShare() {
         const encryptedData = await response.arrayBuffer();
         const cryptoKey = await importFileKey(key);
         const ivBytes = new Uint8Array(base64ToArrayBuffer(iv));
-        const decryptedData = await decryptFile(encryptedData, cryptoKey, ivBytes);
+        const decryptedData = await decryptSharedFile(encryptedData, cryptoKey, ivBytes);
         
         const mimeType = getMimeType(file()!.filename);
         blob = new Blob([decryptedData], { type: mimeType });
@@ -298,7 +273,7 @@ export default function PublicShare() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (err: any) {
-      console.error('Download error:', err);
+      logger.error('Download error:', err);
       setError(err.message || 'Download failed - the link may be incomplete');
     } finally {
       setIsDownloading(false);
@@ -312,13 +287,7 @@ export default function PublicShare() {
     setDownloadingFileId(item.id);
     
     try {
-      const response = await fetch(`/api/public/${token}/file/${item.id}/download`);
-      
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.msg || 'Download failed');
-      }
-      
+      const response = await publicRequestRaw(`/public/${token}/file/${item.id}/download`);
       const blob = await response.blob();
       
       // Note: For folder shares, files are downloaded as-is (encrypted)
@@ -332,7 +301,7 @@ export default function PublicShare() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (err: any) {
-      console.error('Download error:', err);
+      logger.error('Download error:', err);
       setError(err.message || 'Download failed');
     } finally {
       setDownloadingFileId(null);
@@ -391,7 +360,7 @@ export default function PublicShare() {
         </div>
       );
     }
-    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    const ext = getFileExtension(filename);
     const iconColors: Record<string, string> = {
       pdf: 'text-red-500', jpg: 'text-red-500', jpeg: 'text-red-500', png: 'text-red-500', gif: 'text-red-500', webp: 'text-red-500',
       doc: 'text-blue-500', docx: 'text-blue-500', xls: 'text-green-500', xlsx: 'text-green-500',

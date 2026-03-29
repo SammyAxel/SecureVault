@@ -1,14 +1,14 @@
-import { createSignal, createEffect, For, Show, onMount } from 'solid-js';
-import { useAuth } from '../stores/auth';
-import * as api from '../lib/api';
-import { toast } from '../stores/toast';
-import { openConfirm } from '../stores/confirm';
-import { AvatarCropper } from './AvatarCropper';
+import { createSignal, For, Show, onMount } from 'solid-js';
+import { useAuth } from '../../stores/auth';
+import * as api from '../../lib/api';
+import { toast } from '../../stores/toast';
+import { openConfirm } from '../../stores/confirm';
+import { AvatarCropper } from '../AvatarCropper';
 import {
   generateKeyBundle,
   downloadKeyBundle,
-} from '../lib/crypto';
-import { awaitMinElapsed, MIN_CONTENT_LOAD_MS, MIN_FORM_SUBMIT_MS } from '../lib/motion';
+} from '../../lib/crypto';
+import { awaitMinElapsed, MIN_CONTENT_LOAD_MS, MIN_FORM_SUBMIT_MS } from '../../lib/motion';
 
 interface ProfileProps {
   onBack: () => void;
@@ -18,7 +18,7 @@ interface ProfileProps {
 type ProfileTab = 'general' | 'security' | 'sessions' | 'danger';
 
 export default function Profile(props: ProfileProps) {
-  const { user, updateUser, logout } = useAuth();
+  const { logout } = useAuth();
   const [activeTab, setActiveTab] = createSignal<ProfileTab>('general');
   const [tabVisible, setTabVisible] = createSignal(true);
   let tabTimeout: ReturnType<typeof setTimeout> | undefined;

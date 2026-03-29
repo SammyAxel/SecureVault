@@ -1,6 +1,4 @@
-import { onMount, onCleanup } from 'solid-js';
-import Cropper from 'cropperjs';
-import 'cropperjs/dist/cropper.css';
+import { onMount, onCleanup, createSignal, Show } from 'solid-js';
 
 interface AvatarCropperProps {
   imageSrc: string;
@@ -8,33 +6,43 @@ interface AvatarCropperProps {
   onCancel: () => void;
 }
 
-const CROP_SIZE = 400; // Output size for avatar (square, displayed as circle)
-const MAX_OUTPUT_KB = 450; // Stay under 500KB limit with some margin
+const CROP_SIZE = 400;
+const MAX_OUTPUT_KB = 450;
+
+type CropperClass = typeof import('cropperjs').default;
 
 export function AvatarCropper(props: AvatarCropperProps) {
   let containerRef: HTMLDivElement | undefined;
   let imgRef: HTMLImageElement | undefined;
-  let cropper: Cropper | null = null;
+  let cropper: InstanceType<CropperClass> | null = null;
+  let cancelled = false;
+  const [cropperReady, setCropperReady] = createSignal(false);
 
   onMount(() => {
-    if (!imgRef || !containerRef) return;
+    void (async () => {
+      await import('cropperjs/dist/cropper.css');
+      const { default: Cropper } = await import('cropperjs');
+      if (cancelled || !imgRef || !containerRef) return;
 
-    cropper = new Cropper(imgRef, {
-      aspectRatio: 1, // Square crop for circular avatar display
-      viewMode: 1, // Restrict crop box to not exceed the size of the canvas
-      dragMode: 'move',
-      autoCropArea: 0.8,
-      restore: false,
-      guides: true,
-      center: true,
-      highlight: false,
-      cropBoxMovable: true,
-      cropBoxResizable: true,
-      toggleDragModeOnDblclick: false,
-    });
+      cropper = new Cropper(imgRef, {
+        aspectRatio: 1,
+        viewMode: 1,
+        dragMode: 'move',
+        autoCropArea: 0.8,
+        restore: false,
+        guides: true,
+        center: true,
+        highlight: false,
+        cropBoxMovable: true,
+        cropBoxResizable: true,
+        toggleDragModeOnDblclick: false,
+      });
+      setCropperReady(true);
+    })();
   });
 
   onCleanup(() => {
+    cancelled = true;
     cropper?.destroy();
     cropper = null;
   });
@@ -51,7 +59,6 @@ export function AvatarCropper(props: AvatarCropperProps) {
 
     if (!canvas) return;
 
-    // Compress to fit within size limit
     let quality = 0.92;
     let dataUrl = canvas.toDataURL('image/jpeg', quality);
 
@@ -60,7 +67,6 @@ export function AvatarCropper(props: AvatarCropperProps) {
       dataUrl = canvas.toDataURL('image/jpeg', quality);
     }
 
-    // If still too large, try PNG (sometimes smaller for simple images)
     if (dataUrl.length > MAX_OUTPUT_KB * 1024) {
       dataUrl = canvas.toDataURL('image/png');
     }
@@ -79,6 +85,14 @@ export function AvatarCropper(props: AvatarCropperProps) {
         </div>
 
         <div class="relative bg-gray-900 avatar-cropper-area" style={{ height: 'min(70vh, 400px)' }}>
+          <Show when={!cropperReady()}>
+            <div class="absolute inset-0 z-10 flex items-center justify-center bg-gray-900/90 text-gray-400 text-sm">
+              <div class="flex flex-col items-center gap-2">
+                <div class="animate-spin rounded-full h-8 w-8 border-2 border-primary-500/30 border-t-primary-500" />
+                <span>Loading cropper…</span>
+              </div>
+            </div>
+          </Show>
           <div ref={containerRef} class="h-full w-full overflow-hidden">
             <img
               ref={imgRef}
@@ -92,14 +106,17 @@ export function AvatarCropper(props: AvatarCropperProps) {
 
         <div class="p-4 flex gap-3 justify-end border-t border-gray-700">
           <button
+            type="button"
             onClick={props.onCancel}
             class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-colors"
           >
             Cancel
           </button>
           <button
+            type="button"
             onClick={handleSave}
-            class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors"
+            disabled={!cropperReady()}
+            class="px-4 py-2 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
           >
             Save
           </button>

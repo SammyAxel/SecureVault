@@ -4,9 +4,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "build": "vite build",
+    "build:analyze": "vite build --mode analyze",
     "preview": "vite preview",
     "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test e2e/critical-smoke.spec.ts",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:codegen": "playwright codegen http://127.0.0.1:5173 --save-storage=e2e/.auth/user.json"
   },
@@ -18,12 +21,18 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@playwright/test": "^1.49.1",
     "@types/node": "^20.11.0",
     "autoprefixer": "^10.4.17",
+    "eslint": "^9.39.4",
+    "eslint-plugin-solid": "^0.14.5",
+    "globals": "^15.15.0",
     "postcss": "^8.4.33",
+    "rollup-plugin-visualizer": "^7.0.1",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.3",
+    "typescript-eslint": "^8.57.2",
     "vite": "^5.0.12",
     "vite-plugin-solid": "^2.8.2"
   }

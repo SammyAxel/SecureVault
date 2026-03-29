@@ -1,10 +1,9 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, type FastifyRequest } from 'fastify';
 import { db, schema } from '../db/index.js';
 import { eq, and, isNull, sql, inArray } from 'drizzle-orm';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { saveFile, getFile, deleteFile, getStream, getStats } from '../lib/storage.js';
-import { scanFile as virusTotalScan } from '../lib/virustotal.js';
-import { scanFile as malwareBazaarScan } from '../lib/malwarebazaar.js';
+import { scanUploadBuffer } from '../lib/uploadMalwareScan.js';
 import { generateUUID, generateUID } from '../lib/crypto.js';
 import { purgeTrashedOlderThanDays } from '../lib/trashRetention.js';
 import { z } from 'zod';
@@ -23,6 +22,16 @@ const renameSchema = z.object({
 const moveSchema = z.object({
   parentId: z.string().uuid().nullable(),
 });
+
+function warnIfBlobDeleteFailed(
+  request: FastifyRequest,
+  storagePath: string | null | undefined,
+  deleted: boolean
+) {
+  if (storagePath && !deleted) {
+    request.log.warn({ storagePath }, 'Failed to delete physical file');
+  }
+}
 
 export async function fileRoutes(app: FastifyInstance): Promise<void> {
   /** All descendants of a folder in one recursive query (avoids N round-trips per tree level). */
@@ -176,11 +185,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ ok: false, msg: 'Missing encryption metadata' });
     }
 
-    // Malware scan: run independent checks in parallel
-    const [vtResult, mbResult] = await Promise.all([
-      virusTotalScan(buffer, data.filename, fileHash),
-      malwareBazaarScan(buffer, data.filename, fileHash),
-    ]);
+    const { vtResult, mbResult } = await scanUploadBuffer(buffer, data.filename, fileHash);
 
     if (!vtResult.safe || !mbResult.safe) {
       const msg = !vtResult.safe
@@ -407,7 +412,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     for (const f of toDelete) {
       if (f.storagePath) {
         const deleted = await deleteFile(f.storagePath);
-        if (!deleted) console.warn(`Failed to delete physical file: ${f.storagePath}`);
+        warnIfBlobDeleteFailed(request, f.storagePath, deleted);
       }
     }
 
@@ -534,7 +539,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     for (const f of trashed) {
       if (f.storagePath) {
         const deleted = await deleteFile(f.storagePath);
-        if (!deleted) console.warn(`Failed to delete physical file: ${f.storagePath}`);
+        warnIfBlobDeleteFailed(request, f.storagePath, deleted);
       }
     }
 

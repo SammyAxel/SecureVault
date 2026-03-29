@@ -3,6 +3,8 @@
  * Handles all client-side encryption/decryption using Web Crypto API
  */
 
+import { logger } from './logger';
+
 // ============ KEY GENERATION ============
 
 /**
@@ -265,7 +267,7 @@ export function setCurrentKeys(keys: KeyBundle): void {
   try {
     localStorage.setItem(KEYS_STORAGE_KEY, JSON.stringify(keys));
   } catch (e) {
-    console.warn('Failed to save keys to localStorage:', e);
+    logger.warn('Failed to save keys to localStorage:', e);
   }
 }
 
@@ -280,7 +282,7 @@ export function getCurrentKeys(): KeyBundle | null {
       return currentKeys;
     }
   } catch (e) {
-    console.warn('Failed to restore keys from localStorage:', e);
+    logger.warn('Failed to restore keys from localStorage:', e);
   }
   
   return null;
@@ -291,7 +293,7 @@ export function clearCurrentKeys(): void {
   try {
     localStorage.removeItem(KEYS_STORAGE_KEY);
   } catch (e) {
-    console.warn('Failed to clear keys from localStorage:', e);
+    logger.warn('Failed to clear keys from localStorage:', e);
   }
 }
 

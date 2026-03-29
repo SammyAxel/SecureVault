@@ -2,6 +2,7 @@ import { createSignal, createEffect, For, Show, onCleanup } from 'solid-js';
 import * as api from '../lib/api';
 import { toast } from '../stores/toast';
 import { awaitMinElapsed, MIN_CONTENT_LOAD_MS, MIN_SILENT_REFRESH_MS } from '../lib/motion';
+import { logger } from '../lib/logger';
 
 export default function NotificationCenter() {
   const [notifications, setNotifications] = createSignal<api.NotificationItem[]>([]);
@@ -32,7 +33,7 @@ export default function NotificationCenter() {
       setUnreadCount(result.unreadCount);
       setLastCheckTime(Date.now());
     } catch (err) {
-      console.error('Failed to load notifications:', err);
+      logger.error('Failed to load notifications:', err);
     } finally {
       await awaitMinElapsed(started, minMs);
       setIsLoading(false);

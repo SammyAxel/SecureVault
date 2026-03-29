@@ -1,11 +1,10 @@
 import { createSignal, createEffect, Show, For, createMemo } from 'solid-js';
-import { useAuth } from '../stores/auth.jsx';
 import * as api from '../lib/api';
 import type { FileItem } from '../lib/api';
 import { formatSize } from '../lib/format';
 import { toast } from '../stores/toast';
 import { SkeletonFileViewer } from './Skeleton';
-import { CsvPreview, ExcelPreview, WordPreview, TextPreview, getPreviewMimeType, isPreviewableFile } from './FilePreview';
+import { CsvPreview, ExcelPreview, WordPreview, TextPreview, getPreviewMimeType } from './FilePreview';
 import {
   getCurrentKeys,
   importEncryptionPrivateKey,
@@ -14,6 +13,8 @@ import {
   base64ToUint8Array,
 } from '../lib/crypto';
 import { ROUTES, hrefWithCurrentSearch } from '../lib/routes';
+import { getFileExtension } from '../lib/files';
+import { logger } from '../lib/logger';
 import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../lib/motion';
 
 interface FileViewerProps {
@@ -25,12 +26,7 @@ function getMimeType(filename: string): string {
   return getPreviewMimeType(filename);
 }
 
-function isPreviewable(filename: string): boolean {
-  return isPreviewableFile(filename);
-}
-
 export default function FileViewer(props: FileViewerProps) {
-  const { user } = useAuth();
   const [isLoading, setIsLoading] = createSignal(true);
   const [error, setError] = createSignal<string | null>(null);
   const [errorType, setErrorType] = createSignal<'notfound' | 'unauthorized' | 'error'>('error');
@@ -42,7 +38,7 @@ export default function FileViewer(props: FileViewerProps) {
   const [parentPath, setParentPath] = createSignal<Array<{ id: string; uid: string | null; name: string }>>([]);
   const [viewMode, setViewMode] = createSignal<'grid' | 'list'>('grid');
   const [filterType, setFilterType] = createSignal<'all' | 'folders' | 'files'>('all');
-  const [sortBy, setSortBy] = createSignal<'name' | 'type'>('name');
+  const [sortBy] = createSignal<'name' | 'type'>('name');
   const [sortOrder, setSortOrder] = createSignal<'asc' | 'desc'>('asc');
   const [openMenuId, setOpenMenuId] = createSignal<string | null>(null);
 
@@ -122,7 +118,7 @@ export default function FileViewer(props: FileViewerProps) {
       const url = URL.createObjectURL(blob);
       setPreviewUrl(url);
     } catch (err: any) {
-      console.error('Failed to decrypt file:', err);
+      logger.error('Failed to decrypt file:', err);
       setError('Failed to decrypt file');
     }
   };
@@ -234,7 +230,7 @@ export default function FileViewer(props: FileViewerProps) {
         </svg>
       );
     }
-    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    const ext = getFileExtension(filename);
     const iconColors: Record<string, string> = {
       pdf: 'text-red-500',
       doc: 'text-blue-500', docx: 'text-blue-500',
@@ -257,7 +253,7 @@ export default function FileViewer(props: FileViewerProps) {
     const f = file();
     if (!url || !mime || !f) return null;
 
-    const ext = f.filename.split('.').pop()?.toLowerCase() || '';
+    const ext = getFileExtension(f.filename);
 
     if (mime.startsWith('image/')) {
       return <img src={url} alt={f.filename} class="max-w-full max-h-[70vh] mx-auto rounded-lg shadow-lg" />;

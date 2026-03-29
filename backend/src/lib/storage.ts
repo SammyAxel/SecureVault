@@ -1,4 +1,5 @@
 import { mkdir, writeFile, readFile, unlink, stat } from 'fs/promises';
+import { libLogger } from './logger.js';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 import { existsSync, createReadStream, readFileSync } from 'fs';
@@ -75,7 +76,7 @@ export async function deleteFile(relativePath: string): Promise<boolean> {
     await unlink(fullPath);
     return true;
   } catch (error) {
-    console.error(`Failed to delete file: ${relativePath}`, error);
+    libLogger.warn({ relativePath, err: error }, 'Failed to delete file');
     return false;
   }
 }

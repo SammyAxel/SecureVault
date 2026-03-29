@@ -1,7 +1,38 @@
-import { createSignal, createEffect, Show, For } from 'solid-js';
-import * as XLSX from 'xlsx';
-import mammoth from 'mammoth';
+import { createSignal, createEffect, Show, For, lazy, Suspense } from 'solid-js';
+import { getFileExtension } from '../lib/files';
+import { logger } from '../lib/logger';
 import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../lib/motion';
+
+const ExcelPreviewLazy = lazy(() =>
+  import('./FilePreviewExcel').then((m) => ({ default: m.ExcelPreview }))
+);
+const WordPreviewLazy = lazy(() =>
+  import('./FilePreviewWord').then((m) => ({ default: m.WordPreview }))
+);
+
+function PreviewChunkFallback() {
+  return (
+    <div class="flex items-center justify-center p-8 bg-gray-900 rounded-lg">
+      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500" />
+    </div>
+  );
+}
+
+export function ExcelPreview(props: { url: string }) {
+  return (
+    <Suspense fallback={<PreviewChunkFallback />}>
+      <ExcelPreviewLazy {...props} />
+    </Suspense>
+  );
+}
+
+export function WordPreview(props: { url: string }) {
+  return (
+    <Suspense fallback={<PreviewChunkFallback />}>
+      <WordPreviewLazy {...props} />
+    </Suspense>
+  );
+}
 
 // ============ CSV Preview ============
 export function CsvPreview(props: { url: string }) {
@@ -21,7 +52,7 @@ export function CsvPreview(props: { url: string }) {
       setData(rows);
     } catch (err) {
       setError('Failed to load CSV');
-      console.error(err);
+      logger.error(err);
     } finally {
       await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
       setLoading(false);
@@ -74,149 +105,6 @@ export function CsvPreview(props: { url: string }) {
   );
 }
 
-// ============ Excel Preview ============
-export function ExcelPreview(props: { url: string }) {
-  const [sheets, setSheets] = createSignal<{ name: string; data: string[][] }[]>([]);
-  const [activeSheet, setActiveSheet] = createSignal(0);
-  const [error, setError] = createSignal<string | null>(null);
-  const [loading, setLoading] = createSignal(true);
-
-  createEffect(async () => {
-    const started = Date.now();
-    try {
-      setLoading(true);
-      const response = await fetch(props.url);
-      const arrayBuffer = await response.arrayBuffer();
-      
-      // Parse Excel
-      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-      const parsedSheets = workbook.SheetNames.map((name: string) => {
-        const sheet = workbook.Sheets[name];
-        const data = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 });
-        return { name, data: data as string[][] };
-      });
-      
-      setSheets(parsedSheets);
-    } catch (err) {
-      setError('Failed to load Excel file');
-      console.error(err);
-    } finally {
-      await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
-      setLoading(false);
-    }
-  });
-
-  const currentSheet = () => sheets()[activeSheet()]?.data || [];
-
-  return (
-    <div class="bg-gray-900 rounded-lg overflow-hidden">
-      <Show when={loading()}>
-        <div class="flex items-center justify-center p-8">
-          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
-        </div>
-      </Show>
-      
-      <Show when={error()}>
-        <div class="text-red-400 p-4">{error()}</div>
-      </Show>
-      
-      <Show when={!loading() && !error() && sheets().length > 0}>
-        {/* Sheet tabs */}
-        <Show when={sheets().length > 1}>
-          <div class="flex gap-1 p-2 bg-gray-800 overflow-x-auto">
-            <For each={sheets()}>
-              {(sheet, index) => (
-                <button
-                  onClick={() => setActiveSheet(index())}
-                  class={`px-3 py-1 rounded text-sm whitespace-nowrap ${
-                    activeSheet() === index()
-                      ? 'bg-primary-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                >
-                  {sheet.name}
-                </button>
-              )}
-            </For>
-          </div>
-        </Show>
-        
-        {/* Sheet content */}
-        <div class="overflow-auto max-h-[60vh]">
-          <table class="min-w-full text-sm text-gray-300">
-            <tbody>
-              <For each={currentSheet()}>
-                {(row, rowIndex) => (
-                  <tr class={rowIndex() === 0 ? 'bg-gray-800 font-medium' : rowIndex() % 2 === 0 ? 'bg-gray-850' : 'bg-gray-900'}>
-                    <For each={row}>
-                      {(cell) => (
-                        <td class="px-3 py-2 border border-gray-700 whitespace-nowrap">
-                          {cell ?? ''}
-                        </td>
-                      )}
-                    </For>
-                  </tr>
-                )}
-              </For>
-            </tbody>
-          </table>
-        </div>
-      </Show>
-    </div>
-  );
-}
-
-// ============ Word Preview ============
-export function WordPreview(props: { url: string }) {
-  const [html, setHtml] = createSignal<string>('');
-  const [error, setError] = createSignal<string | null>(null);
-  const [loading, setLoading] = createSignal(true);
-
-  createEffect(async () => {
-    const started = Date.now();
-    try {
-      setLoading(true);
-      const response = await fetch(props.url);
-      const arrayBuffer = await response.arrayBuffer();
-      
-      // Convert Word to HTML
-      const result = await mammoth.convertToHtml({ arrayBuffer });
-      setHtml(result.value);
-      
-      if (result.messages.length > 0) {
-        console.warn('Mammoth warnings:', result.messages);
-      }
-    } catch (err) {
-      setError('Failed to load Word document');
-      console.error(err);
-    } finally {
-      await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
-      setLoading(false);
-    }
-  });
-
-  return (
-    <div class="bg-white rounded-lg overflow-hidden">
-      <Show when={loading()}>
-        <div class="flex items-center justify-center p-8 bg-gray-900">
-          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
-        </div>
-      </Show>
-      
-      <Show when={error()}>
-        <div class="text-red-400 p-4 bg-gray-900">{error()}</div>
-      </Show>
-      
-      <Show when={!loading() && !error()}>
-        <div 
-          class="p-6 max-h-[70vh] overflow-auto prose prose-sm max-w-none text-gray-900"
-          innerHTML={html()}
-        />
-      </Show>
-    </div>
-  );
-}
-
 // ============ Text Preview ============
 export function TextPreview(props: { url: string; filename: string }) {
   const [content, setContent] = createSignal<string>('');
@@ -232,7 +120,7 @@ export function TextPreview(props: { url: string; filename: string }) {
       setContent(text);
     } catch (err) {
       setError('Failed to load file');
-      console.error(err);
+      logger.error(err);
     } finally {
       await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
       setLoading(false);
@@ -240,10 +128,7 @@ export function TextPreview(props: { url: string; filename: string }) {
   });
 
   // Determine if content is JSON for pretty printing
-  const isJson = () => {
-    const ext = props.filename.split('.').pop()?.toLowerCase();
-    return ext === 'json';
-  };
+  const isJson = () => getFileExtension(props.filename) === 'json';
 
   const displayContent = () => {
     if (isJson()) {
@@ -340,7 +225,7 @@ function parseCSV(text: string): string[][] {
 
 // ============ MIME type helpers ============
 export function getPreviewMimeType(filename: string): string {
-  const ext = filename.split('.').pop()?.toLowerCase() || '';
+  const ext = getFileExtension(filename);
   const mimeTypes: Record<string, string> = {
     // Images
     'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
@@ -367,7 +252,7 @@ export function getPreviewMimeType(filename: string): string {
 }
 
 export function isPreviewableFile(filename: string): boolean {
-  const ext = filename.split('.').pop()?.toLowerCase() || '';
+  const ext = getFileExtension(filename);
   const previewable = [
     // Images
     'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp',
@@ -384,6 +269,4 @@ export function isPreviewableFile(filename: string): boolean {
   return previewable.includes(ext);
 }
 
-export function getFileExtension(filename: string): string {
-  return filename.split('.').pop()?.toLowerCase() || '';
-}
+export { getFileExtension } from '../lib/files';

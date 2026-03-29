@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdir } from 'fs/promises';
 import { dirname } from 'path';
+import { libLogger } from '../lib/logger.js';
 
 const DB_PATH = process.env.DATABASE_URL || './data/securevault.db';
 
@@ -146,7 +147,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_trusted_devices_fingerprint ON trusted_devices(device_fingerprint);
 `);
 
-console.log('✅ Database tables created/verified');
+libLogger.info('Database tables created/verified');
 
 // ============ MIGRATIONS ============
 // Helper to check if column exists
@@ -157,37 +158,37 @@ function hasColumn(table: string, column: string): boolean {
 
 // Migration 1: Add 'uid' column to files table
 if (!hasColumn('files', 'uid')) {
-  console.log('⚡ Running migration: Adding uid column to files table...');
+  libLogger.info('Running migration: Adding uid column to files table');
   try {
     db.exec('ALTER TABLE files ADD COLUMN uid TEXT');
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_files_uid ON files(uid)');
-    console.log('✅ Migration successful: uid column added');
+    libLogger.info('Migration successful: uid column added');
   } catch (error) {
-    console.error('❌ Migration failed (uid):', error);
+    libLogger.error({ err: error }, 'Migration failed (uid)');
     throw error;
   }
 }
 
 // Migration 2: Add 'avatar' column to users table
 if (!hasColumn('users', 'avatar')) {
-  console.log('⚡ Running migration: Adding avatar column to users table...');
+  libLogger.info('Running migration: Adding avatar column to users table');
   try {
     db.exec('ALTER TABLE users ADD COLUMN avatar TEXT');
-    console.log('✅ Migration successful: avatar column added');
+    libLogger.info('Migration successful: avatar column added');
   } catch (error) {
-    console.error('❌ Migration failed (avatar):', error);
+    libLogger.error({ err: error }, 'Migration failed (avatar)');
     throw error;
   }
 }
 
 // Migration 3: Add 'display_name' column to users table
 if (!hasColumn('users', 'display_name')) {
-  console.log('⚡ Running migration: Adding display_name column to users table...');
+  libLogger.info('Running migration: Adding display_name column to users table');
   try {
     db.exec('ALTER TABLE users ADD COLUMN display_name TEXT');
-    console.log('✅ Migration successful: display_name column added');
+    libLogger.info('Migration successful: display_name column added');
   } catch (error) {
-    console.error('❌ Migration failed (display_name):', error);
+    libLogger.error({ err: error }, 'Migration failed (display_name)');
     throw error;
   }
 }
@@ -195,7 +196,7 @@ if (!hasColumn('users', 'display_name')) {
 // Migration 4: Create settings table if not exists
 const tableList = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'").all() as { name: string }[];
 if (tableList.length === 0) {
-  console.log('⚡ Running migration: Creating settings table...');
+  libLogger.info('Running migration: Creating settings table');
   try {
     db.exec(`
       CREATE TABLE settings (
@@ -203,12 +204,12 @@ if (tableList.length === 0) {
         value TEXT
       );
     `);
-    console.log('✅ Migration successful: settings table created');
+    libLogger.info('Migration successful: settings table created');
   } catch (error) {
-    console.error('❌ Migration failed (settings):', error);
+    libLogger.error({ err: error }, 'Migration failed (settings)');
     throw error;
   }
 }
 
-console.log('✅ All database migrations completed!');
+libLogger.info('All database migrations completed');
 db.close();

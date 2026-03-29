@@ -7,6 +7,9 @@
 import { db, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import { createHash, randomUUID } from 'crypto';
+import { libLogger } from './logger.js';
+
+const log = libLogger.child({ name: 'VirusTotal' });
 
 const VT_FILE_REPORT_URL = 'https://www.virustotal.com/api/v3/files';
 
@@ -251,13 +254,13 @@ export async function scanFile(buffer: Buffer, filename: string, fileHash?: stri
       : [];
 
   if (candidates.length === 0) {
-    console.log('[VirusTotal] No API key configured, skipping scan');
+    log.debug('No API key configured, skipping scan');
     return { safe: true }; // No key configured = skip scan
   }
 
   try {
     const hash = fileHash || calculateSHA256(buffer);
-    console.log(`[VirusTotal] Scanning file: ${filename} (SHA256: ${hash}, size: ${buffer.length} bytes, hashProvided: ${!!fileHash})`);
+    log.debug({ filename, hash, size: buffer.length, hashProvided: !!fileHash }, 'Scanning file');
 
     for (const key of candidates) {
       if (key.id !== 'env') {
@@ -272,21 +275,21 @@ export async function scanFile(buffer: Buffer, filename: string, fileHash?: stri
         headers: { 'x-apikey': key.key },
       });
 
-      console.log(`[VirusTotal] API Response status: ${reportRes.status}`);
+      log.debug({ status: reportRes.status }, 'API response');
 
       if (reportRes.status === 404) {
-        console.log(`[VirusTotal] Hash not found in VT database (404) - file unknown`);
+        log.debug('Hash not found in VT database (404)');
         return { safe: true, hashFound: false };
       }
 
       if (reportRes.status === 429) {
-        console.log(`[VirusTotal] Rate limited (429) for key ${key.id}, trying next key if available`);
+        log.warn({ keyId: key.id }, 'Rate limited (429), trying next key');
         continue;
       }
 
       if (!reportRes.ok) {
         const errBody = await reportRes.text();
-        console.error(`[VirusTotal] API error: ${reportRes.status} - ${errBody.slice(0, 200)}`);
+        log.error({ status: reportRes.status, body: errBody.slice(0, 200) }, 'API error');
         return {
           safe: false,
           error: `VirusTotal lookup failed: ${reportRes.status} ${errBody.slice(0, 200)}`,
@@ -303,27 +306,27 @@ export async function scanFile(buffer: Buffer, filename: string, fileHash?: stri
 
       const stats = reportJson?.data?.attributes?.last_analysis_stats;
       if (stats == null) {
-        console.log(`[VirusTotal] Hash found but no analysis stats available`);
+        log.debug('Hash found but no analysis stats available');
         return { safe: true, hashFound: true };
       }
 
       const malicious = stats.malicious ?? 0;
       const suspicious = stats.suspicious ?? 0;
 
-      console.log(`[VirusTotal] Analysis complete - Malicious: ${malicious}, Suspicious: ${suspicious}`);
+      log.info({ malicious, suspicious }, 'Analysis complete');
 
       if (malicious > 0 || suspicious > 0) {
-        console.warn(`[VirusTotal] File flagged as malicious!`);
+        log.warn('File flagged as malicious');
         return { safe: false, malicious, suspicious, hashFound: true };
       }
 
-      console.log(`[VirusTotal] File is clean`);
+      log.debug('File is clean');
       return { safe: true, malicious: 0, suspicious: 0, hashFound: true };
     }
 
     return { safe: true, error: 'VirusTotal rate limit; all keys exhausted' };
   } catch (err: any) {
-    console.error(`[VirusTotal] Error during scan:`, err);
+    log.error({ err }, 'Error during scan');
     return { safe: false, error: err?.message ?? 'VirusTotal scan failed' };
   }
 }

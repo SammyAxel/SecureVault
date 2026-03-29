@@ -17,6 +17,7 @@ import {
 } from '../lib/malwarebazaar.js';
 import { getStats } from '../lib/storage.js';
 import { getClientIp } from '../lib/clientIp.js';
+import { libLogger } from '../lib/logger.js';
 import { z } from 'zod';
 
 // Admin middleware - checks if user is admin
@@ -51,7 +52,7 @@ export async function logAudit(
       userAgent,
     });
   } catch (error) {
-    console.error('Failed to log audit:', error);
+    libLogger.error({ err: error }, 'Failed to log audit');
   }
 }
 

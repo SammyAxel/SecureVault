@@ -45,6 +45,44 @@ async function request<T>(
   return data;
 }
 
+/** JSON GET/POST without Authorization (public share links, etc.). */
+export async function publicRequestJson<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const headers: HeadersInit = { ...options.headers };
+  if (options.body && !(options.body instanceof FormData)) {
+    (headers as Record<string, string>)['Content-Type'] = 'application/json';
+  }
+  const response = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+  const text = await response.text();
+  let data: unknown = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new ApiError(response.status, 'Invalid response');
+  }
+  const obj = data as { msg?: string; quotaExceeded?: boolean };
+  if (!response.ok) {
+    throw new ApiError(response.status, obj.msg || 'Request failed', data as { quotaExceeded?: boolean });
+  }
+  return data as T;
+}
+
+/** Unauthenticated fetch; throws ApiError when status is not ok (body parsed for `msg` when JSON). */
+export async function publicRequestRaw(endpoint: string, init?: RequestInit): Promise<Response> {
+  const response = await fetch(`${API_BASE}${endpoint}`, init);
+  if (!response.ok) {
+    const text = await response.text();
+    let msg = 'Request failed';
+    try {
+      const j = text ? JSON.parse(text) : {};
+      if (j && typeof j.msg === 'string') msg = j.msg;
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(response.status, msg);
+  }
+  return response;
+}
+
 // ============ SETUP ============
 
 export async function checkSetupStatus() {

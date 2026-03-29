@@ -1,16 +1,17 @@
 import { createSignal, createEffect, For, Show } from 'solid-js';
-import { useAuth } from '../stores/auth.jsx';
-import * as api from '../lib/api';
-import type { AdminStats, AdminUser, AuditLogEntry, UserSession, VirusTotalKey, VirusTotalUsage } from '../lib/api';
-import { formatSize } from '../lib/format';
-import { toast } from '../stores/toast';
-import { openConfirm } from '../stores/confirm';
-import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../lib/motion';
+import { useAuth } from '../../stores/auth.jsx';
+import * as api from '../../lib/api';
+import type { AdminStats, AdminUser, AuditLogEntry, UserSession, VirusTotalKey, VirusTotalUsage } from '../../lib/api';
+import { formatSize } from '../../lib/format';
+import { toast } from '../../stores/toast';
+import { openConfirm } from '../../stores/confirm';
+import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../../lib/motion';
+import { logger } from '../../lib/logger';
 
 type TabType = 'overview' | 'users' | 'audit' | 'settings';
 
 export default function AdminDashboard() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = createSignal<TabType>('overview');
   const [tabVisible, setTabVisible] = createSignal(true);
   let tabTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -67,7 +68,7 @@ export default function AdminDashboard() {
       const result = await api.getAdminStats();
       setStats(result.stats);
     } catch (error) {
-      console.error('Failed to load stats:', error);
+      logger.error('Failed to load stats:', error);
     }
   };
 
@@ -81,7 +82,7 @@ export default function AdminDashboard() {
       setUsersPage(result.pagination.page);
       setUsersTotalPages(result.pagination.totalPages);
     } catch (error) {
-      console.error('Failed to load users:', error);
+      logger.error('Failed to load users:', error);
     } finally {
       await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
       setIsLoading(false);
@@ -101,7 +102,7 @@ export default function AdminDashboard() {
       setMalwareBazaarConfigured(mbResult.configured);
       setMalwareBazaarMaskedKey(mbResult.maskedKey);
     } catch (error) {
-      console.error('Failed to load admin settings:', error);
+      logger.error('Failed to load admin settings:', error);
     }
   };
 
@@ -206,7 +207,7 @@ export default function AdminDashboard() {
       setLogsPage(result.pagination.page);
       setLogsTotalPages(result.pagination.totalPages);
     } catch (error) {
-      console.error('Failed to load audit logs:', error);
+      logger.error('Failed to load audit logs:', error);
     } finally {
       await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
       setIsLoading(false);

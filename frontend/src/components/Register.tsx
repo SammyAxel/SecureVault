@@ -99,13 +99,17 @@ export default function Register(props: RegisterProps) {
 
         <form onSubmit={handleRegister}>
           <div class="mb-4">
-            <label class="block text-gray-400 text-sm mb-2">Username</label>
+            <label for="register-username" class="block text-gray-400 text-sm mb-2">
+              Username
+            </label>
             <input
+              id="register-username"
               type="text"
               value={username()}
               onInput={(e) => setUsername(e.currentTarget.value)}
               class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500"
               placeholder="Choose a username"
+              autocomplete="username"
               minLength={3}
               maxLength={80}
               pattern="^[a-zA-Z0-9_]+$"

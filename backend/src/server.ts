@@ -118,9 +118,9 @@ if (process.env.NODE_ENV === 'production') {
 // Run migrations on startup
 try {
   await import('./db/migrate.js');
-  console.log('✅ Database migrations completed');
+  app.log.info('Database migrations completed');
 } catch (err) {
-  console.error('❌ Database migration failed:', err);
+  app.log.error(err, 'Database migration failed');
   process.exit(1);
 }
 
@@ -137,12 +137,13 @@ async function purgeExpiredTrash() {
       days: TRASH_RETENTION_DAYS,
     });
     if (res.deletedCount > 0) {
-      console.log(
-        `🧹 Purged ${res.deletedCount} trashed item(s) older than ${TRASH_RETENTION_DAYS}d (reclaimed ${res.reclaimedBytes} bytes)`
+      app.log.info(
+        { deletedCount: res.deletedCount, reclaimedBytes: res.reclaimedBytes, days: TRASH_RETENTION_DAYS },
+        'Trash retention purge completed'
       );
     }
   } catch (err) {
-    console.error('❌ Trash retention purge failed:', err);
+    app.log.error(err, 'Trash retention purge failed');
   }
 }
 
@@ -156,7 +157,7 @@ const HOST = process.env.HOST || (isDev ? 'localhost' : '0.0.0.0');
 
 try {
   await app.listen({ port: PORT, host: HOST });
-  console.log(`🚀 SecureVault API running on http://${HOST}:${PORT}`);
+  app.log.info(`SecureVault API running on http://${HOST}:${PORT}`);
 
   // Periodic trash purge
   const intervalMs = Math.max(1, TRASH_PURGE_INTERVAL_HOURS) * 60 * 60 * 1000;
