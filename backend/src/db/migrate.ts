@@ -17,7 +17,7 @@ db.pragma('journal_mode = WAL');
 db.exec(`
   -- Users table
   CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT PRIMARY KEY NOT NULL,
     username TEXT UNIQUE NOT NULL,
     public_key_pem TEXT NOT NULL,
     encryption_public_key_pem TEXT,
@@ -38,7 +38,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     token TEXT UNIQUE NOT NULL,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at INTEGER DEFAULT (unixepoch()),
     expires_at INTEGER NOT NULL,
     device_info TEXT,
@@ -52,7 +52,7 @@ db.exec(`
     id TEXT PRIMARY KEY,
     uid TEXT UNIQUE,
     filename TEXT NOT NULL,
-    owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     encrypted_key TEXT NOT NULL,
     iv TEXT NOT NULL,
     storage_path TEXT,
@@ -68,7 +68,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS file_shares (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     file_id TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-    recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     encrypted_key TEXT NOT NULL,
     created_at INTEGER DEFAULT (unixepoch())
   );
@@ -87,7 +87,7 @@ db.exec(`
   -- Audit logs table
   CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
     username TEXT NOT NULL,
     action TEXT NOT NULL,
     resource_type TEXT,
@@ -101,7 +101,7 @@ db.exec(`
   -- Notifications table
   CREATE TABLE IF NOT EXISTS notifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     type TEXT NOT NULL,
     title TEXT NOT NULL,
     message TEXT NOT NULL,
@@ -114,7 +114,7 @@ db.exec(`
   -- Trusted devices table
   CREATE TABLE IF NOT EXISTS trusted_devices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     device_fingerprint TEXT NOT NULL,
     device_name TEXT NOT NULL,
     browser TEXT,

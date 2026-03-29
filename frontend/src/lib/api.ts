@@ -95,7 +95,7 @@ export async function setupAdmin(
   encryptionPublicKey: string,
   virusTotalApiKey?: string
 ) {
-  return request<{ ok: boolean; userId: number; username: string; isAdmin: boolean }>('/setup/admin', {
+  return request<{ ok: boolean; userId: string; username: string; isAdmin: boolean }>('/setup/admin', {
     method: 'POST',
     body: JSON.stringify({
       username,
@@ -113,7 +113,7 @@ export async function register(
   publicKey: string,
   encryptionPublicKey: string
 ) {
-  return request<{ ok: boolean; userId: number; username: string }>('/register', {
+  return request<{ ok: boolean; userId: string; username: string }>('/register', {
     method: 'POST',
     body: JSON.stringify({ username, publicKey, encryptionPublicKey }),
   });
@@ -147,7 +147,7 @@ export async function verifyLogin(
     token: string;
     expiresAt: string;
     user: {
-      id: number;
+      id: string;
       username: string;
       isAdmin: boolean;
       storageUsed: number;
@@ -177,7 +177,7 @@ export async function getCurrentUser() {
   return request<{
     ok: boolean;
     user: {
-      id: number;
+      id: string;
       username: string;
       isAdmin: boolean;
       storageUsed: number;
@@ -483,7 +483,7 @@ export interface AdminStats {
 }
 
 export interface AdminUser {
-  id: number;
+  id: string;
   username: string;
   isAdmin: boolean;
   isSuspended: boolean;
@@ -510,7 +510,7 @@ export interface VirusTotalUsage {
 
 export interface AuditLogEntry {
   id: number;
-  userId: number | null;
+  userId: string | null;
   username: string;
   action: string;
   resourceType: string | null;
@@ -549,14 +549,14 @@ export async function getAdminUsers(page = 1, limit = 20) {
   }>(`/admin/users?page=${page}&limit=${limit}`);
 }
 
-export async function suspendUser(userId: number, suspended: boolean) {
+export async function suspendUser(userId: string, suspended: boolean) {
   return request<{ ok: boolean; suspended: boolean }>(`/admin/users/${userId}/suspend`, {
     method: 'PATCH',
     body: JSON.stringify({ suspended }),
   });
 }
 
-export async function updateUserQuota(userId: number, quota: number) {
+export async function updateUserQuota(userId: string, quota: number) {
   return request<{ ok: boolean; quota: number }>(`/admin/users/${userId}/quota`, {
     method: 'PATCH',
     body: JSON.stringify({ quota }),
@@ -629,7 +629,7 @@ export async function getAuditLogs(page = 1, limit = 50) {
   }>(`/admin/audit-logs?page=${page}&limit=${limit}`);
 }
 
-export async function getUserSessions(userId: number) {
+export async function getUserSessions(userId: string) {
   return request<{ ok: boolean; sessions: UserSession[] }>(`/admin/users/${userId}/sessions`);
 }
 
@@ -643,7 +643,7 @@ export async function adminRevokeSession(sessionId: number) {
 
 export interface NotificationItem {
   id: number;
-  userId: number;
+  userId: string;
   type: string;
   title: string;
   message: string;

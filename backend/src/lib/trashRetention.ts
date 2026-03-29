@@ -6,7 +6,7 @@ export async function purgeTrashedOlderThanDays(args: {
   schema: any;
   deleteFile: (relativePath: string) => Promise<boolean>;
   days: number;
-  ownerId?: number;
+  ownerId?: string;
 }): Promise<{ deletedCount: number; reclaimedBytes: number }> {
   const { db, schema, deleteFile, days, ownerId } = args;
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -24,17 +24,17 @@ export async function purgeTrashedOlderThanDays(args: {
   }
 
   // Reclaim per-owner storage used.
-  const reclaimedByOwner = new Map<number, number>();
+  const reclaimedByOwner = new Map<string, number>();
   for (const f of expired) {
     reclaimedByOwner.set(f.ownerId, (reclaimedByOwner.get(f.ownerId) || 0) + (f.fileSize || 0));
   }
 
-  for (const [uid, reclaimed] of reclaimedByOwner.entries()) {
-    const user = await db.query.users.findFirst({ where: eq(schema.users.id, uid) });
+  for (const [ownerUserId, reclaimed] of reclaimedByOwner.entries()) {
+    const user = await db.query.users.findFirst({ where: eq(schema.users.id, ownerUserId) });
     if (!user) continue;
     await db.update(schema.users)
       .set({ storageUsed: Math.max(0, (user.storageUsed || 0) - reclaimed) })
-      .where(eq(schema.users.id, uid));
+      .where(eq(schema.users.id, ownerUserId));
   }
 
   // Delete rows (CASCADE handles descendants if present).

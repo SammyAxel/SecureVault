@@ -20,6 +20,8 @@ import { getClientIp } from '../lib/clientIp.js';
 import { libLogger } from '../lib/logger.js';
 import { z } from 'zod';
 
+const userUuidParam = z.string().uuid();
+
 // Admin middleware - checks if user is admin
 async function requireAdmin(request: AuthenticatedRequest, reply: any) {
   await authenticate(request, reply);
@@ -31,7 +33,7 @@ async function requireAdmin(request: AuthenticatedRequest, reply: any) {
 
 // Audit log helper function
 export async function logAudit(
-  userId: number | null,
+  userId: string | null,
   username: string,
   action: string,
   resourceType?: string,
@@ -281,8 +283,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/api/admin/users/:userId/suspend', { preHandler: requireAdmin }, async (request: AuthenticatedRequest, reply) => {
     const admin = request.user!;
     const { userId } = request.params as { userId: string };
-    const userIdNum = parseInt(userId);
-    
+    const idParsed = userUuidParam.safeParse(userId);
+    if (!idParsed.success) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid user ID' });
+    }
+    const targetUserId = idParsed.data;
+
     const body = suspendUserSchema.safeParse(request.body);
     if (!body.success) {
       return reply.status(400).send({ ok: false, msg: 'Invalid request' });
@@ -291,12 +297,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const { suspended } = body.data;
     
     // Prevent self-suspension
-    if (userIdNum === admin.id) {
+    if (targetUserId === admin.id) {
       return reply.status(400).send({ ok: false, msg: 'Cannot suspend yourself' });
     }
     
     const user = await db.query.users.findFirst({
-      where: eq(schema.users.id, userIdNum),
+      where: eq(schema.users.id, targetUserId),
     });
     
     if (!user) {
@@ -308,11 +314,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         isSuspended: suspended,
         suspendedAt: suspended ? new Date() : null,
       })
-      .where(eq(schema.users.id, userIdNum));
+      .where(eq(schema.users.id, targetUserId));
     
     // If suspending, delete all their sessions
     if (suspended) {
-      await db.delete(schema.sessions).where(eq(schema.sessions.userId, userIdNum));
+      await db.delete(schema.sessions).where(eq(schema.sessions.userId, targetUserId));
     }
     
     // Log audit
@@ -334,8 +340,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/api/admin/users/:userId/quota', { preHandler: requireAdmin }, async (request: AuthenticatedRequest, reply) => {
     const admin = request.user!;
     const { userId } = request.params as { userId: string };
-    const userIdNum = parseInt(userId);
-    
+    const idParsed = userUuidParam.safeParse(userId);
+    if (!idParsed.success) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid user ID' });
+    }
+    const targetUserId = idParsed.data;
+
     const body = updateQuotaSchema.safeParse(request.body);
     if (!body.success) {
       return reply.status(400).send({ ok: false, msg: 'Invalid request' });
@@ -344,7 +354,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     let { quota } = body.data;
 
     const user = await db.query.users.findFirst({
-      where: eq(schema.users.id, userIdNum),
+      where: eq(schema.users.id, targetUserId),
     });
 
     if (!user) {
@@ -362,7 +372,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
     await db.update(schema.users)
       .set({ storageQuota: quota })
-      .where(eq(schema.users.id, userIdNum));
+      .where(eq(schema.users.id, targetUserId));
 
     // Log audit
     await logAudit(
@@ -427,10 +437,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // ============ GET USER SESSIONS (Admin) ============
   app.get('/api/admin/users/:userId/sessions', { preHandler: requireAdmin }, async (request: AuthenticatedRequest, reply) => {
     const { userId } = request.params as { userId: string };
-    const userIdNum = parseInt(userId);
-    
+    const idParsed = userUuidParam.safeParse(userId);
+    if (!idParsed.success) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid user ID' });
+    }
+    const targetUserId = idParsed.data;
+
     const sessions = await db.query.sessions.findMany({
-      where: eq(schema.sessions.userId, userIdNum),
+      where: eq(schema.sessions.userId, targetUserId),
       orderBy: (sessions: any, { desc }: any) => [desc(sessions.createdAt)],
     });
     

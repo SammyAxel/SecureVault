@@ -46,7 +46,7 @@ const { root: STORAGE_ROOT } = loadStorageConfig();
 /**
  * Save a file to organized storage: {userId}/{YYYY-MM}/{randomName}.enc
  */
-export async function saveFile(userId: number, buffer: Buffer): Promise<StorageResult> {
+export async function saveFile(userId: string, buffer: Buffer): Promise<StorageResult> {
   const now = new Date();
   const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const filename = randomBytes(16).toString('hex') + '.enc';

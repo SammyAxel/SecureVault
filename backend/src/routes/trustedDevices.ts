@@ -72,7 +72,7 @@ export async function trustedDevicesRoutes(app: FastifyInstance): Promise<void> 
 
 // ============ HELPER FUNCTIONS ============
 
-export async function checkTrustedDevice(userId: number, deviceFingerprint: string): Promise<boolean> {
+export async function checkTrustedDevice(userId: string, deviceFingerprint: string): Promise<boolean> {
   const device = await db.query.trustedDevices.findFirst({
     where: and(
       eq(schema.trustedDevices.userId, userId),
@@ -84,7 +84,7 @@ export async function checkTrustedDevice(userId: number, deviceFingerprint: stri
 }
 
 export async function addTrustedDevice(
-  userId: number,
+  userId: string,
   deviceFingerprint: string,
   deviceName: string,
   browser: string | null,
@@ -118,7 +118,7 @@ export async function addTrustedDevice(
 }
 
 export async function updateTrustedDeviceLastUsed(
-  userId: number,
+  userId: string,
   deviceFingerprint: string
 ): Promise<void> {
   await db.update(schema.trustedDevices)

@@ -157,7 +157,7 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     await db.delete(schema.fileShares)
       .where(and(
         eq(schema.fileShares.fileId, fileId),
-        eq(schema.fileShares.recipientId, parseInt(recipientId))
+        eq(schema.fileShares.recipientId, recipientId)
       ));
     
     return { ok: true };
@@ -254,7 +254,7 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
   });
   
   // Helper function to recursively get all files in a folder
-  async function getFolderContents(folderId: string, ownerId: number): Promise<any[]> {
+  async function getFolderContents(folderId: string, ownerId: string): Promise<any[]> {
     const items = await db.query.files.findMany({
       where: and(
         eq(schema.files.parentId, folderId),

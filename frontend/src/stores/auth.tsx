@@ -6,7 +6,7 @@ import { logger } from '../lib/logger';
 import { toast } from './toast';
 
 export interface User {
-  id: number;
+  id: string;
   username: string;
   displayName?: string;
   avatar?: string;
@@ -109,6 +109,7 @@ export const AuthProvider: ParentComponent = (props) => {
   });
 
   const login = (newToken: string, newUser: User) => {
+    toast.dismissAll();
     localStorage.setItem('securevault_token', newToken);
     setToken(newToken);
     setUser(newUser);

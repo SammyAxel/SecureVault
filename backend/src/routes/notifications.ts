@@ -114,7 +114,7 @@ export default async function notificationRoutes(app: FastifyInstance) {
 
 // ============ HELPER FUNCTION ============
 export async function createNotification(
-  userId: number,
+  userId: string,
   type: string,
   title: string,
   message: string,

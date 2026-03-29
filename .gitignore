@@ -1,24 +1,43 @@
 # Dependencies
 node_modules/
-*/node_modules/
 
 # Build outputs
 dist/
-*/dist/
+build/
 
-# Data files
+# Runtime / local data (never commit)
 data/
 uploads/
+storage/
 *.db
 *.db-wal
 *.db-shm
+*.sqlite
+*.sqlite3
 
-# Environment
+# Local config (use storage.json.example as template)
+backend/config/storage.json
+
+# Environment & secrets
 .env
+.env.*
+!.env.example
+!.env.*.example
 .env.local
 .env.*.local
+.envrc
 
-# IDE
+# Private keys / certificates (keys used by the app are in-browser; these are accidental leaks)
+*.pem
+*.p12
+*.key
+*_keys.json
+keys.json
+
+# Docker local overrides (machine-specific paths, ports)
+docker-compose.override.yml
+
+# IDE (optional: commit .vscode/extensions.json for team recommendations)
 .vscode/
 .idea/
 *.swp
@@ -27,16 +46,26 @@ uploads/
 # OS
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
 # Logs
 *.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# Keys (never commit!)
-*_keys.json
-keys.json
+# Test / coverage
+coverage/
+.nyc_output/
 
-# Playwright (seluruh setup frontend — tidak di-commit)
+# Caches & incremental TS
+.cache/
+.eslintcache
+*.tsbuildinfo
+
+# Playwright (setup tidak di-commit — sesuai kebijakan repo)
 frontend/playwright.config.ts
 frontend/e2e/
 playwright-report/

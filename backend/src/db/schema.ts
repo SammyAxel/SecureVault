@@ -1,9 +1,10 @@
-import { sqliteTable, text, integer, blob } from 'drizzle-orm/sqlite-core';
+import { randomUUID } from 'node:crypto';
+import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 import { relations } from 'drizzle-orm';
 
 // ============ USERS ============
 export const users = sqliteTable('users', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+  id: text('id').primaryKey().$defaultFn(() => randomUUID()),
   username: text('username').unique().notNull(),
   publicKeyPem: text('public_key_pem').notNull(), // ECDSA signing key
   encryptionPublicKeyPem: text('encryption_public_key_pem'), // RSA-OAEP encryption key
@@ -24,7 +25,7 @@ export const users = sqliteTable('users', {
 export const sessions = sqliteTable('sessions', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   token: text('token').unique().notNull(),
-  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
   expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
   deviceInfo: text('device_info'),
@@ -38,7 +39,7 @@ export const files = sqliteTable('files', {
   id: text('id').primaryKey(), // UUID
   uid: text('uid').unique(), // Short URL-friendly ID (e.g., "abc123xyz")
   filename: text('filename').notNull(),
-  ownerId: integer('owner_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  ownerId: text('owner_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   encryptedKey: text('encrypted_key').notNull(),
   iv: text('iv').notNull(),
   storagePath: text('storage_path'), // Path on filesystem (null for folders)
@@ -54,7 +55,7 @@ export const files = sqliteTable('files', {
 export const fileShares = sqliteTable('file_shares', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   fileId: text('file_id').notNull().references(() => files.id, { onDelete: 'cascade' }),
-  recipientId: integer('recipient_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  recipientId: text('recipient_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   encryptedKey: text('encrypted_key').notNull(), // File key encrypted with recipient's public key
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
@@ -73,7 +74,7 @@ export const publicShares = sqliteTable('public_shares', {
 // ============ AUDIT LOGS ============
 export const auditLogs = sqliteTable('audit_logs', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  userId: integer('user_id').references(() => users.id, { onDelete: 'set null' }),
+  userId: text('user_id').references(() => users.id, { onDelete: 'set null' }),
   username: text('username').notNull(), // Store username in case user is deleted
   action: text('action').notNull(), // LOGIN, LOGOUT, UPLOAD, DOWNLOAD, DELETE, SHARE, etc.
   resourceType: text('resource_type'), // FILE, FOLDER, USER, SESSION, etc.
@@ -93,7 +94,7 @@ export const settings = sqliteTable('settings', {
 // ============ NOTIFICATIONS ============
 export const notifications = sqliteTable('notifications', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   type: text('type').notNull(), // 'file_shared', 'admin_action', 'storage_warning', 'public_access', etc.
   title: text('title').notNull(),
   message: text('message').notNull(),
@@ -106,7 +107,7 @@ export const notifications = sqliteTable('notifications', {
 // ============ TRUSTED DEVICES ============
 export const trustedDevices = sqliteTable('trusted_devices', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   deviceFingerprint: text('device_fingerprint').notNull(), // Unique device identifier
   deviceName: text('device_name').notNull(), // e.g., "Chrome on Windows"
   browser: text('browser'),
