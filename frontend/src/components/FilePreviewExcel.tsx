@@ -78,7 +78,7 @@ export function ExcelPreview(props: { url: string }) {
                       rowIndex() === 0
                         ? 'bg-gray-800 font-medium'
                         : rowIndex() % 2 === 0
-                          ? 'bg-gray-850'
+                          ? 'bg-gray-800/80'
                           : 'bg-gray-900'
                     }
                   >

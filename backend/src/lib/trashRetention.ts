@@ -1,5 +1,11 @@
 import { and, eq, lte } from 'drizzle-orm';
 
+/** Single source of truth for retention window (matches periodic purge in server). */
+export function getTrashRetentionDays(): number {
+  const n = parseInt(process.env.TRASH_RETENTION_DAYS || '30', 10);
+  return Number.isFinite(n) && n > 0 ? n : 30;
+}
+
 export async function purgeTrashedOlderThanDays(args: {
   // Keep typings loose here to avoid exporting internal schema types.
   db: any;

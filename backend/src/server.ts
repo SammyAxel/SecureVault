@@ -11,7 +11,7 @@ import { readFile } from 'fs/promises';
 import { getClientIp } from './lib/clientIp.js';
 import { db, schema } from './db/index.js';
 import { deleteFile } from './lib/storage.js';
-import { purgeTrashedOlderThanDays } from './lib/trashRetention.js';
+import { getTrashRetentionDays, purgeTrashedOlderThanDays } from './lib/trashRetention.js';
 import { authRoutes } from './routes/auth.js';
 import { fileRoutes } from './routes/files.js';
 import { shareRoutes } from './routes/share.js';
@@ -125,7 +125,7 @@ try {
 }
 
 // ============ TRASH RETENTION ============
-const TRASH_RETENTION_DAYS = parseInt(process.env.TRASH_RETENTION_DAYS || '30', 10);
+const TRASH_RETENTION_DAYS = getTrashRetentionDays();
 const TRASH_PURGE_INTERVAL_HOURS = parseInt(process.env.TRASH_PURGE_INTERVAL_HOURS || '24', 10);
 
 async function purgeExpiredTrash() {

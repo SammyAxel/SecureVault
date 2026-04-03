@@ -12,6 +12,8 @@ import { ROUTES, hrefWithCurrentSearch } from '../../lib/routes';
 import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../../lib/motion';
 import { getFileExtension } from '../../lib/files';
 import { logger } from '../../lib/logger';
+import { TRASH_RETENTION_DAYS } from '../../lib/config';
+import { daysUntilTrashPurge } from '../../lib/trashUi';
 import { openConfirm } from '../../stores/confirm';
 import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile } from '../FilePreview';
 import { SkeletonDashboard } from '../Skeleton';
@@ -62,6 +64,8 @@ export default function Dashboard(props: DashboardProps) {
   const [currentFolderUid, setCurrentFolderUid] = createSignal<string | null>(null);
   const [folderPath, setFolderPath] = createSignal<Array<{ id: string | null; uid: string | null; name: string }>>([{ id: null, uid: null, name: 'My Files' }]);
   const [isLoading, setIsLoading] = createSignal(false);
+  const [loadError, setLoadError] = createSignal<string | null>(null);
+  const [loadRetryNonce, setLoadRetryNonce] = createSignal(0);
   const [isDragging, setIsDragging] = createSignal(false);
   const [uploadProgress, setUploadProgress] = createSignal<string | null>(null);
   
@@ -182,6 +186,7 @@ export default function Dashboard(props: DashboardProps) {
   // Load files for the active section
   const loadFiles = async () => {
     const started = Date.now();
+    setLoadError(null);
     setIsLoading(true);
     try {
       if (section() === 'drive') {
@@ -219,6 +224,7 @@ export default function Dashboard(props: DashboardProps) {
             isFolder: f.isFolder,
             parentId: f.parentId,
             createdAt: f.deletedAt,
+            deletedAt: f.deletedAt,
             encryptedKey: '',
             iv: '',
           }))
@@ -227,6 +233,13 @@ export default function Dashboard(props: DashboardProps) {
       }
     } catch (error) {
       logger.error('Failed to load files:', error);
+      const msg =
+        error instanceof ApiError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : 'Could not load this view.';
+      setLoadError(msg);
     } finally {
       await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
       setIsLoading(false);
@@ -244,9 +257,10 @@ export default function Dashboard(props: DashboardProps) {
   };
 
   createEffect(() => {
-    // Re-load when folder, section, or UID changes (UID effect below can also trigger load)
+    // Re-load when folder, section, retry, or UID changes (UID effect below can also trigger load)
     section();
     currentFolder();
+    loadRetryNonce();
     loadFiles();
   });
 
@@ -297,17 +311,41 @@ export default function Dashboard(props: DashboardProps) {
     })();
   });
 
-  // Close menu when clicking outside
+  const closeActionMenu = () => {
+    setOpenMenuId(null);
+    setMenuPosition(null);
+  };
+
+  // Close menu when clicking outside; Escape closes menu
   createEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (openMenuId() && !target.closest('.action-menu-container')) {
-        setOpenMenuId(null);
-        setMenuPosition(null);
+        closeActionMenu();
       }
     };
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
+  });
+
+  createEffect(() => {
+    if (!openMenuId()) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeActionMenu();
+    };
+    document.addEventListener('keydown', onKey);
+    onCleanup(() => document.removeEventListener('keydown', onKey));
+  });
+
+  createEffect(() => {
+    const id = openMenuId();
+    if (!id) return;
+    const raf = requestAnimationFrame(() => {
+      const root = document.getElementById(`action-menu-${id}`);
+      const first = root?.querySelector<HTMLElement>('button, [href]');
+      first?.focus();
+    });
+    onCleanup(() => cancelAnimationFrame(raf));
   });
 
   // Navigate to folder (Google Drive style)
@@ -970,9 +1008,11 @@ export default function Dashboard(props: DashboardProps) {
           
           <Show when={section() === 'drive'}>
             <button
+              type="button"
               onClick={openCreateFolderModal}
               class="px-3 py-2 sm:px-4 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm flex items-center gap-2 touch-target sm:min-h-0"
               title="New Folder"
+              aria-label="New folder"
             >
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
@@ -980,7 +1020,7 @@ export default function Dashboard(props: DashboardProps) {
               <span class="hidden sm:inline">New Folder</span>
             </button>
 
-            <label class="px-3 py-2 sm:px-4 bg-primary-600 hover:bg-primary-700 rounded-lg text-sm cursor-pointer flex items-center gap-2 touch-target sm:min-h-0">
+            <label class="px-3 py-2 sm:px-4 bg-primary-600 hover:bg-primary-700 rounded-lg text-sm cursor-pointer flex items-center gap-2 touch-target sm:min-h-0" aria-label="Upload files">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
               </svg>
@@ -997,9 +1037,11 @@ export default function Dashboard(props: DashboardProps) {
 
           <Show when={section() === 'trash' && files().length > 0}>
             <button
+              type="button"
               onClick={handleEmptyTrash}
               class="px-3 py-2 sm:px-4 bg-red-600/90 hover:bg-red-600 rounded-lg text-sm flex items-center gap-2 text-white touch-target sm:min-h-0"
               title="Empty Trash"
+              aria-label="Empty trash"
             >
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -1040,9 +1082,11 @@ export default function Dashboard(props: DashboardProps) {
 
           {/* Sort Order Toggle */}
           <button
+            type="button"
             onClick={() => setSortOrder(sortOrder() === 'asc' ? 'desc' : 'asc')}
             class="p-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
             title={sortOrder() === 'asc' ? 'Ascending' : 'Descending'}
+            aria-label={sortOrder() === 'asc' ? 'Sort ascending' : 'Sort descending'}
           >
             <Show when={sortOrder() === 'asc'} fallback={
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1062,6 +1106,27 @@ export default function Dashboard(props: DashboardProps) {
             </span>
           </Show>
       </div>
+
+      <Show when={loadError() && !isLoading()}>
+        <div class="mb-4 bg-red-900/20 border border-red-800/60 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <p class="text-sm text-red-200">{loadError()}</p>
+          <button
+            type="button"
+            onClick={() => setLoadRetryNonce((n) => n + 1)}
+            class="shrink-0 px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-sm"
+          >
+            Retry
+          </button>
+        </div>
+      </Show>
+
+      <Show when={section() === 'trash' && trashCurrentFolder() === null && !loadError()}>
+        <div class="mb-4 rounded-xl border border-amber-800/50 bg-amber-950/30 px-4 py-3 text-sm text-amber-100/90">
+          Items in Trash are permanently removed after{' '}
+          <span class="font-medium text-amber-50">{TRASH_RETENTION_DAYS}</span> days. Restore anything you still need
+          before then.
+        </div>
+      </Show>
 
       {/* Bulk Actions Bar */}
       <Show when={selectedFiles().size > 0}>
@@ -1139,31 +1204,69 @@ export default function Dashboard(props: DashboardProps) {
           </Show>
 
         {/* Empty state - no files at all */}
-        <Show when={!isLoading() && trashLevelFiles().length === 0}>
-          <div class="py-12 text-center">
-            <svg class="w-16 h-16 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <Show when={!isLoading() && !loadError() && trashLevelFiles().length === 0}>
+          <div class="py-12 text-center max-w-lg mx-auto px-2">
+            <svg class="w-16 h-16 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
             <Show
               when={section() === 'drive'}
               fallback={
-                <p class="text-gray-400">
-                  {section() === 'shared'
-                    ? 'No files have been shared with you yet.'
-                    : trashCurrentFolder() !== null
-                      ? 'This folder is empty.'
-                      : 'Trash is empty.'}
-                </p>
+                <div class="space-y-3">
+                  <Show
+                    when={section() === 'shared'}
+                    fallback={
+                      <div class="space-y-2">
+                        <p class="text-gray-300 font-medium">
+                          {trashCurrentFolder() !== null ? 'This folder is empty.' : 'Trash is empty.'}
+                        </p>
+                        <Show when={section() === 'trash' && trashCurrentFolder() === null}>
+                          <p class="text-gray-500 text-sm">
+                            Deleted items are removed for good after {TRASH_RETENTION_DAYS} days.
+                          </p>
+                        </Show>
+                        <Show when={section() === 'trash' && trashCurrentFolder() === null}>
+                          <button
+                            type="button"
+                            onClick={() => props.navigate?.(hrefWithCurrentSearch(ROUTES.drive))}
+                            class="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium"
+                          >
+                            Go to My Drive
+                          </button>
+                        </Show>
+                      </div>
+                    }
+                  >
+                    <p class="text-gray-300">Nothing shared with you yet.</p>
+                    <p class="text-gray-500 text-sm">
+                      When someone shares a file or folder, it will appear here. You still decrypt it with your own keys.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => props.navigate?.(hrefWithCurrentSearch(ROUTES.drive))}
+                      class="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-sm"
+                    >
+                      Back to My Drive
+                    </button>
+                  </Show>
+                </div>
               }
             >
               <p class="text-gray-400 mb-2">Drag and drop files here</p>
-              <p class="text-gray-500 text-sm">or click Upload button above</p>
+              <p class="text-gray-500 text-sm mb-4">or use Upload above</p>
+              <button
+                type="button"
+                onClick={() => props.navigate?.(hrefWithCurrentSearch(ROUTES.home))}
+                class="text-primary-400 hover:text-primary-300 text-sm underline"
+              >
+                View suggestions on Home
+              </button>
             </Show>
           </div>
         </Show>
 
         {/* No search/filter results */}
-        <Show when={!isLoading() && trashLevelFiles().length > 0 && filteredFiles().length === 0}>
+        <Show when={!isLoading() && !loadError() && trashLevelFiles().length > 0 && filteredFiles().length === 0}>
           <div class="py-12 text-center">
             <svg class="w-16 h-16 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1183,10 +1286,10 @@ export default function Dashboard(props: DashboardProps) {
           </div>
         </Show>
 
-        <Show when={!isLoading() && filteredFiles().length > 0}>
-          <div class="rounded-lg border border-gray-700 overflow-hidden">
+        <Show when={!isLoading() && !loadError() && filteredFiles().length > 0}>
+          <div class="rounded-lg border border-gray-700 overflow-hidden bg-gray-900/20">
             <div class="overflow-x-auto -mx-px">
-              <table class="w-full min-w-[500px]">
+              <table class="w-full min-w-[520px] table-fixed">
                 <thead class="bg-gray-800">
                   <tr>
                     <th class="w-10 px-4 py-3">
@@ -1195,12 +1298,15 @@ export default function Dashboard(props: DashboardProps) {
                         checked={selectedFiles().size === filteredFiles().length && filteredFiles().length > 0}
                         onChange={toggleSelectAll}
                         class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-primary-500 focus:ring-primary-500 focus:ring-offset-gray-800 cursor-pointer"
+                        aria-label="Select all items"
                       />
                     </th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Name</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Size</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Date</th>
-                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-400 uppercase">Actions</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase w-[min(40%,280px)] min-w-0">Name</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase w-24 whitespace-nowrap">Size</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase min-w-[8.5rem] whitespace-nowrap">
+                      {section() === 'trash' ? 'Removed' : 'Date'}
+                    </th>
+                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-400 uppercase w-24 whitespace-nowrap">Actions</th>
                   </tr>
               </thead>
               <tbody class="divide-y divide-gray-700">
@@ -1224,10 +1330,11 @@ export default function Dashboard(props: DashboardProps) {
                           onChange={() => toggleFileSelection(file.id)}
                           class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-primary-500 focus:ring-primary-500 focus:ring-offset-gray-800 cursor-pointer"
                           onClick={(e) => e.stopPropagation()}
+                          aria-label={`Select ${file.filename}`}
                         />
                       </td>
-                      <td class="px-4 py-3">
-                        <div class="flex items-center gap-3">
+                      <td class="px-4 py-3 min-w-0">
+                        <div class="flex items-center gap-3 min-w-0">
                           {file.isFolder ? (
                             <svg class="w-5 h-5 text-yellow-500 flex-shrink-0 cursor-grab" fill="currentColor" viewBox="0 0 20 20">
                               <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
@@ -1264,9 +1371,22 @@ export default function Dashboard(props: DashboardProps) {
                           ) : (
                             <button
                               type="button"
-                              class={`text-left text-white ${isPreviewable(file.filename) ? 'hover:text-primary-400' : ''}`}
-                              onClick={() => isPreviewable(file.filename) && handleOpen(file)}
-                              title={isPreviewable(file.filename) ? 'Click to preview' : ''}
+                              class={`text-left min-w-0 ${
+                                section() === 'trash'
+                                  ? 'text-gray-400 cursor-default'
+                                  : `text-white ${isPreviewable(file.filename) ? 'hover:text-primary-400' : ''}`
+                              }`}
+                              disabled={section() === 'trash'}
+                              onClick={() =>
+                                section() !== 'trash' && isPreviewable(file.filename) && handleOpen(file)
+                              }
+                              title={
+                                section() === 'trash'
+                                  ? 'Preview is not available in Trash'
+                                  : isPreviewable(file.filename)
+                                    ? 'Click to preview'
+                                    : ''
+                              }
                             >
                               {file.filename}
                               <Show when={(file as any).owner}>
@@ -1278,20 +1398,30 @@ export default function Dashboard(props: DashboardProps) {
                           )}
                         </div>
                       </td>
-                      <td class="px-4 py-3 text-gray-400 text-sm">
+                      <td class="px-4 py-3 text-gray-400 text-sm whitespace-nowrap tabular-nums">
                         {formatSize(file.fileSize, { zero: 'dash' })}
                       </td>
-                      <td class="px-4 py-3 text-gray-400 text-sm">
-                        {new Date(file.createdAt).toLocaleDateString()}
+                      <td class="px-4 py-3 text-gray-400 text-sm min-w-0">
+                        <div class="whitespace-nowrap">{new Date(file.createdAt).toLocaleDateString()}</div>
+                        <Show when={section() === 'trash' && file.deletedAt}>
+                          <div class="text-xs text-gray-500 mt-0.5">
+                            Deletes in {daysUntilTrashPurge(file.deletedAt!)}d
+                          </div>
+                        </Show>
                       </td>
                       <td class="px-4 py-3 text-right">
                         <div class="relative action-menu-container">
                           <button
+                            type="button"
+                            id={`file-actions-trigger-${file.id}`}
+                            aria-label={`Actions for ${file.filename}`}
+                            aria-haspopup="menu"
+                            aria-expanded={openMenuId() === file.id}
+                            aria-controls={openMenuId() === file.id ? `action-menu-${file.id}` : undefined}
                             onClick={(e) => {
                               e.stopPropagation();
                               if (openMenuId() === file.id) {
-                                setOpenMenuId(null);
-                                setMenuPosition(null);
+                                closeActionMenu();
                               } else {
                                 const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                                 const menuW = 192;
@@ -1306,7 +1436,6 @@ export default function Dashboard(props: DashboardProps) {
                               }
                             }}
                             class="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-700"
-                            title="Actions"
                           >
                             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                               <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
@@ -1327,7 +1456,7 @@ export default function Dashboard(props: DashboardProps) {
         <div class="absolute inset-0 z-10 flex items-center justify-center bg-gray-900/55 backdrop-blur-[1px] rounded-xl pointer-events-none min-h-[120px]">
           <div class="flex flex-col items-center gap-2">
             <div class="animate-spin rounded-full h-10 w-10 border-2 border-primary-400 border-t-transparent" />
-            <p class="text-sm text-gray-300">Mencari…</p>
+            <p class="text-sm text-gray-300">Searching…</p>
           </div>
         </div>
       </Show>
@@ -1341,12 +1470,15 @@ export default function Dashboard(props: DashboardProps) {
           const pos = menuPosition()!;
           return (
             <div 
+              id={`action-menu-${file.id}`}
+              role="menu"
+              aria-labelledby={`file-actions-trigger-${file.id}`}
               class="fixed w-48 max-w-[calc(100vw-1rem)] bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 action-menu-container"
               style={{ top: `${pos.top}px`, left: `${pos.left}px` }}
             >
               {!file.isFolder && isPreviewable(file.filename) && (
                 <button
-                  onClick={() => { handleOpen(file); setOpenMenuId(null); setMenuPosition(null); }}
+                  onClick={() => { handleOpen(file); closeActionMenu(); }}
                   class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2 rounded-t-lg"
                 >
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1360,7 +1492,7 @@ export default function Dashboard(props: DashboardProps) {
               {section() === 'trash' && (
                 <>
                   <button
-                    onClick={() => { handleRestore(file); setOpenMenuId(null); setMenuPosition(null); }}
+                    onClick={() => { handleRestore(file); closeActionMenu(); }}
                     class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2 rounded-t-lg"
                   >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1369,7 +1501,7 @@ export default function Dashboard(props: DashboardProps) {
                     Restore
                   </button>
                   <button
-                    onClick={() => { handlePermanentDelete(file); setOpenMenuId(null); setMenuPosition(null); }}
+                    onClick={() => { handlePermanentDelete(file); closeActionMenu(); }}
                     class="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-gray-700 flex items-center gap-2 rounded-b-lg"
                   >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1382,7 +1514,7 @@ export default function Dashboard(props: DashboardProps) {
 
               <Show when={section() === 'drive'}>
                 <button
-                  onClick={() => { openRenameModal(file); setOpenMenuId(null); setMenuPosition(null); }}
+                  onClick={() => { openRenameModal(file); closeActionMenu(); }}
                   class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
                 >
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1391,7 +1523,7 @@ export default function Dashboard(props: DashboardProps) {
                   Rename
                 </button>
                 <button
-                  onClick={() => { openMoveModal(file); setOpenMenuId(null); setMenuPosition(null); }}
+                  onClick={() => { openMoveModal(file); closeActionMenu(); }}
                   class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
                 >
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1400,7 +1532,7 @@ export default function Dashboard(props: DashboardProps) {
                   Move
                 </button>
                 <button
-                  onClick={() => { setShareFile(file); setOpenMenuId(null); setMenuPosition(null); }}
+                  onClick={() => { setShareFile(file); closeActionMenu(); }}
                   class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
                 >
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1410,7 +1542,7 @@ export default function Dashboard(props: DashboardProps) {
                 </button>
                 {!file.isFolder && file.uid && (
                   <button
-                    onClick={() => { copyUIDLink(file); setOpenMenuId(null); setMenuPosition(null); }}
+                    onClick={() => { copyUIDLink(file); closeActionMenu(); }}
                     class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
                   >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1422,7 +1554,7 @@ export default function Dashboard(props: DashboardProps) {
               </Show>
               {section() !== 'trash' && !file.isFolder && (
                 <button
-                  onClick={() => { handleDownload(file); setOpenMenuId(null); setMenuPosition(null); }}
+                  onClick={() => { handleDownload(file); closeActionMenu(); }}
                   class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
                 >
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1433,7 +1565,7 @@ export default function Dashboard(props: DashboardProps) {
               )}
               <Show when={section() === 'drive'}>
                 <button
-                  onClick={() => { handleDelete(file); setOpenMenuId(null); setMenuPosition(null); }}
+                  onClick={() => { handleDelete(file); closeActionMenu(); }}
                   class="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-gray-700 flex items-center gap-2 rounded-b-lg"
                 >
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

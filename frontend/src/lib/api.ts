@@ -273,6 +273,8 @@ export interface FileItem {
   isFolder: boolean;
   parentId: string | null;
   createdAt: string;
+  /** Present for items loaded from Trash (server `deletedAt`). */
+  deletedAt?: string;
   encryptedKey: string;
   iv: string;
 }

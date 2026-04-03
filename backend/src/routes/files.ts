@@ -5,7 +5,7 @@ import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { saveFile, getFile, deleteFile, getStream, getStats } from '../lib/storage.js';
 import { scanUploadBuffer } from '../lib/uploadMalwareScan.js';
 import { generateUUID, generateUID } from '../lib/crypto.js';
-import { purgeTrashedOlderThanDays } from '../lib/trashRetention.js';
+import { getTrashRetentionDays, purgeTrashedOlderThanDays } from '../lib/trashRetention.js';
 import { z } from 'zod';
 import { logAudit } from './admin.js';
 import { getClientIp } from '../lib/clientIp.js';
@@ -486,7 +486,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       db,
       schema,
       deleteFile,
-      days: 30,
+      days: getTrashRetentionDays(),
       ownerId: user.id,
     });
     
@@ -520,7 +520,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       db,
       schema,
       deleteFile,
-      days: 30,
+      days: getTrashRetentionDays(),
       ownerId: user.id,
     });
 

@@ -87,7 +87,7 @@ export function CsvPreview(props: { url: string }) {
           <tbody>
             <For each={data().slice(1)}>
               {(row, rowIndex) => (
-                <tr class={rowIndex() % 2 === 0 ? 'bg-gray-850' : 'bg-gray-900'}>
+                <tr class={rowIndex() % 2 === 0 ? 'bg-gray-800/80' : 'bg-gray-900'}>
                   <For each={row}>
                     {(cell) => (
                       <td class="px-3 py-2 border-b border-gray-800 whitespace-nowrap">

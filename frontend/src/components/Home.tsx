@@ -2,28 +2,32 @@ import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
 import * as api from '../lib/api';
 import type { FileItem } from '../lib/api';
 import { formatSize } from '../lib/format';
-import { toast } from '../stores/toast';
 import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../lib/motion';
 
 export default function Home(props: {
   search: string;
   searchLoading?: boolean;
+  onGoToDrive?: () => void;
   onOpenFolder: (folderId: string, folderName: string, folderUid?: string | null) => void;
   onOpenFile: (file: FileItem) => void;
   onDownloadFile: (file: FileItem) => void;
 }) {
   const [files, setFiles] = createSignal<FileItem[]>([]);
   const [isLoading, setIsLoading] = createSignal(true);
+  const [loadError, setLoadError] = createSignal<string | null>(null);
+  const [loadNonce, setLoadNonce] = createSignal(0);
 
   createEffect(() => {
+    loadNonce();
     (async () => {
       const started = Date.now();
+      setLoadError(null);
       setIsLoading(true);
       try {
         const res = await api.listFiles();
         setFiles(res.files);
       } catch (e: any) {
-        toast.error(e?.message || 'Failed to load Home');
+        setLoadError(e?.message || 'Something went wrong while loading Home.');
       } finally {
         await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
         setIsLoading(false);
@@ -52,6 +56,10 @@ export default function Home(props: {
       .slice(0, 8)
   );
 
+  const vaultEmpty = () => !props.search.trim() && files().length === 0;
+  const searchNoHits = () =>
+    !!props.search.trim() && visible().length === 0 && files().length > 0;
+
   return (
     <div class="pb-20">
       <div class="flex items-center justify-between mb-4 sm:mb-6">
@@ -61,12 +69,61 @@ export default function Home(props: {
         </div>
       </div>
 
+      <Show when={loadError()}>
+        <div class="bg-red-900/20 border border-red-800/60 rounded-xl p-4 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <p class="text-sm text-red-200">{loadError()}</p>
+          <button
+            type="button"
+            onClick={() => setLoadNonce((n) => n + 1)}
+            class="shrink-0 px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-sm"
+          >
+            Retry
+          </button>
+        </div>
+      </Show>
+
       <Show when={!isLoading()} fallback={
         <div class="bg-gray-800/60 border border-gray-700 rounded-xl p-6 animate-sv-rise">
           <div class="animate-spin rounded-full h-8 w-8 border-2 border-primary-500/30 border-t-primary-500 mx-auto mb-3"></div>
           <p class="text-gray-400 text-center text-sm">Loading…</p>
         </div>
       }>
+        <Show when={!loadError()}>
+          <Show when={vaultEmpty()}>
+            <div class="bg-gray-800/40 border border-gray-700 rounded-xl p-8 text-center mb-8">
+              <svg class="w-14 h-14 mx-auto text-gray-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              <h3 class="text-white font-medium mb-1">Your vault is empty</h3>
+              <p class="text-gray-400 text-sm mb-4 max-w-md mx-auto">
+                Upload files or create a folder in My Drive. They will show up here as suggestions.
+              </p>
+              <Show when={props.onGoToDrive}>
+                <button
+                  type="button"
+                  onClick={() => props.onGoToDrive?.()}
+                  class="px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium"
+                >
+                  Open My Drive
+                </button>
+              </Show>
+            </div>
+          </Show>
+
+          <Show when={searchNoHits()}>
+            <div class="bg-gray-800/40 border border-gray-700 rounded-xl p-6 text-center mb-6">
+              <p class="text-gray-300 text-sm mb-3">No results match your search on Home.</p>
+              <button
+                type="button"
+                onClick={() => props.onGoToDrive?.()}
+                class="text-primary-400 hover:text-primary-300 text-sm underline"
+              >
+                Search in My Drive instead
+              </button>
+            </div>
+          </Show>
+
+        <Show when={!vaultEmpty() && !searchNoHits()}>
         <div class="relative animate-sv-rise">
           <div
             class={`space-y-8 transition-opacity duration-300 ease-out ${props.searchLoading ? 'opacity-40 pointer-events-none' : ''}`}
@@ -97,9 +154,18 @@ export default function Home(props: {
                   </button>
                 )}
               </For>
-              <Show when={suggestedFolders().length === 0}>
-                <div class="col-span-2 sm:col-span-3 text-gray-500 text-sm">
-                  No folders yet. Create one in My Drive to get started.
+              <Show when={suggestedFolders().length === 0 && !vaultEmpty()}>
+                <div class="col-span-2 sm:col-span-3 flex flex-col sm:flex-row sm:items-center gap-3 text-gray-500 text-sm">
+                  <span>No folders yet. Create one in My Drive.</span>
+                  <Show when={props.onGoToDrive}>
+                    <button
+                      type="button"
+                      onClick={() => props.onGoToDrive?.()}
+                      class="text-primary-400 hover:text-primary-300 text-sm font-medium w-fit"
+                    >
+                      Open My Drive →
+                    </button>
+                  </Show>
                 </div>
               </Show>
             </div>
@@ -138,8 +204,19 @@ export default function Home(props: {
                   </div>
                 )}
               </For>
-              <Show when={suggestedFiles().length === 0}>
-                <div class="text-gray-500 text-sm">No files yet. Upload something in My Drive.</div>
+              <Show when={suggestedFiles().length === 0 && !vaultEmpty()}>
+                <div class="flex flex-col sm:flex-row sm:items-center gap-3 text-gray-500 text-sm">
+                  <span>No files yet. Upload from My Drive.</span>
+                  <Show when={props.onGoToDrive}>
+                    <button
+                      type="button"
+                      onClick={() => props.onGoToDrive?.()}
+                      class="text-primary-400 hover:text-primary-300 text-sm font-medium w-fit"
+                    >
+                      Upload in My Drive →
+                    </button>
+                  </Show>
+                </div>
               </Show>
             </div>
           </section>
@@ -148,13 +225,14 @@ export default function Home(props: {
             <div class="absolute inset-0 flex items-center justify-center rounded-xl bg-gray-900/50 backdrop-blur-[1px] min-h-[220px] z-10">
               <div class="flex flex-col items-center gap-2">
                 <div class="animate-spin rounded-full h-10 w-10 border-2 border-primary-400 border-t-transparent" />
-                <p class="text-sm text-gray-300">Mencari…</p>
+                <p class="text-sm text-gray-300">Searching…</p>
               </div>
             </div>
           </Show>
         </div>
+        </Show>
+        </Show>
       </Show>
     </div>
   );
 }
-

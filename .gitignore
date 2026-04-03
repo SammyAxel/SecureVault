@@ -65,6 +65,11 @@ coverage/
 .eslintcache
 *.tsbuildinfo
 
+# Vite / esbuild: transient compiled config beside vite.config.* (timestamp + hash in name)
+**/vite.config.ts.timestamp-*.mjs
+**/vite.config.js.timestamp-*.mjs
+**/vite.config.mts.timestamp-*.mjs
+
 # Playwright (setup tidak di-commit — sesuai kebijakan repo)
 frontend/playwright.config.ts
 frontend/e2e/

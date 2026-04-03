@@ -21,6 +21,7 @@ const Profile = lazy(() => import('./components/profile/Profile'));
 const AdminDashboard = lazy(() => import('./components/admin/AdminDashboard'));
 const PublicShare = lazy(() => import('./components/share/PublicShare'));
 import Sidebar from './components/Sidebar';
+import MobileNavDrawer from './components/MobileNavDrawer';
 import Home from './components/Home';
 import * as api from './lib/api';
 import {
@@ -52,6 +53,7 @@ function LazyRouteFallback() {
 
 function AppContent() {
   const { user, isLoading, logout } = useAuth();
+  let mobileSearchField: HTMLInputElement | undefined;
   const [showRegister, setShowRegister] = createSignal(false);
   const [needsSetup, setNeedsSetup] = createSignal(false);
   const [checkingSetup, setCheckingSetup] = createSignal(true);
@@ -63,6 +65,25 @@ function AppContent() {
   const [searchLoading, setSearchLoading] = createSignal(false);
   const [routeContentOpacity, setRouteContentOpacity] = createSignal(1);
   const [routeEntering, setRouteEntering] = createSignal(false);
+  const [mobileNavOpen, setMobileNavOpen] = createSignal(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = createSignal(false);
+
+  const driveShellOpen = () => !!user() && !isAdminPage() && !isProfilePage();
+
+  createEffect(() => {
+    if (!mobileSearchOpen()) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileSearchOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    onCleanup(() => document.removeEventListener('keydown', onKey));
+  });
+
+  createEffect(() => {
+    if (!mobileSearchOpen()) return;
+    const id = window.requestAnimationFrame(() => mobileSearchField?.focus());
+    onCleanup(() => cancelAnimationFrame(id));
+  });
 
   const clearVaultSearch = () => {
     setSearchDraft('');
@@ -90,6 +111,7 @@ function AppContent() {
         : pathWithSearch(p, '');
     const cur = `${window.location.pathname}${window.location.search}`;
     if (next !== cur) replacePath(next);
+    setMobileSearchOpen(false);
     requestAnimationFrame(() => {
       window.setTimeout(() => setSearchLoading(false), MIN_SEARCH_FEEDBACK_MS);
     });
@@ -244,6 +266,19 @@ function AppContent() {
           {/* Header */}
           <header class="bg-gray-800 border-b border-gray-700">
             <div class="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-4 flex items-center justify-between gap-2 flex-wrap">
+              <div class="flex items-center gap-1 sm:gap-2 min-w-0 shrink-0">
+                <Show when={user() && !isAdminPage() && !isProfilePage()}>
+                  <button
+                    type="button"
+                    class="lg:hidden p-2 rounded-lg text-gray-300 hover:bg-gray-700 hover:text-white touch-target"
+                    onClick={() => setMobileNavOpen(true)}
+                    aria-label="Open navigation menu"
+                  >
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                  </button>
+                </Show>
               <div
                 class="flex items-center gap-2 sm:gap-3 cursor-pointer min-w-0 shrink-0"
                 onClick={() => {
@@ -257,6 +292,7 @@ function AppContent() {
                   </svg>
                 </div>
                 <h1 class="text-lg sm:text-xl font-bold text-white truncate">SecureVault</h1>
+              </div>
               </div>
 
               <Show when={user()}>
@@ -276,13 +312,14 @@ function AppContent() {
                           fill="none"
                           stroke="currentColor"
                           viewBox="0 0 24 24"
+                          aria-hidden
                         >
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                         </svg>
                         <input
                           type="text"
                           name="q"
-                          placeholder="search in vault"
+                          placeholder="Search in SecureVault…"
                           value={searchDraft()}
                           onInput={(e) => setSearchDraft(e.currentTarget.value)}
                           class="w-full pl-10 pr-10 py-2 bg-gray-700/60 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -293,9 +330,10 @@ function AppContent() {
                             type="button"
                             onClick={() => clearVaultSearch()}
                             class="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-white"
-                            title="Hapus pencarian"
+                            title="Clear search"
+                            aria-label="Clear search"
                           >
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                             </svg>
                           </button>
@@ -304,7 +342,7 @@ function AppContent() {
                       <Show when={searchLoading()}>
                         <div
                           class="shrink-0 w-9 h-9 flex items-center justify-center"
-                          aria-label="Mencari"
+                          aria-label="Searching"
                         >
                           <div class="animate-spin rounded-full h-6 w-6 border-2 border-primary-400 border-t-transparent" />
                         </div>
@@ -314,9 +352,22 @@ function AppContent() {
                 </Show>
 
                 <div class="flex items-center gap-2 sm:gap-4 shrink-0">
+                  <Show when={!isAdminPage() && !isProfilePage()}>
+                    <button
+                      type="button"
+                      class="md:hidden p-2 rounded-lg text-gray-300 hover:bg-gray-700 hover:text-white touch-target"
+                      onClick={() => setMobileSearchOpen(true)}
+                      aria-label="Open search"
+                    >
+                      <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                    </button>
+                  </Show>
                   {/* Admin link: icon-only on small screens */}
                   <Show when={user()?.isAdmin}>
                     <button
+                      type="button"
                       onClick={() =>
                         isAdminPage() ? window.history.back() : navigate(ROUTES.admin)
                       }
@@ -326,6 +377,7 @@ function AppContent() {
                           : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                       }`}
                       title={isAdminPage() ? 'Exit Admin' : 'Admin'}
+                      aria-label={isAdminPage() ? 'Exit admin' : 'Open admin dashboard'}
                     >
                       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -347,6 +399,86 @@ function AppContent() {
               </Show>
             </div>
           </header>
+
+          <MobileNavDrawer
+            open={mobileNavOpen() && driveShellOpen()}
+            onClose={() => setMobileNavOpen(false)}
+            active={activeDriveSection()}
+            onNavigate={(section) => {
+              clearVaultSearch();
+              navigate(pathForDriveSection(section));
+            }}
+          />
+
+          <Show when={mobileSearchOpen() && driveShellOpen()}>
+            <div
+              class="fixed inset-0 z-[70] md:hidden flex flex-col"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Search vault"
+            >
+              <button
+                type="button"
+                class="absolute inset-0 bg-black/60 border-0 w-full h-full cursor-default"
+                onClick={() => setMobileSearchOpen(false)}
+                aria-label="Close search"
+              />
+              <div class="relative mt-[max(12px,env(safe-area-inset-top))] mx-3 rounded-xl bg-gray-800 border border-gray-700 shadow-vault-float overflow-hidden">
+                <div class="flex items-center justify-between px-3 py-2 border-b border-gray-700">
+                  <span class="text-sm font-medium text-white">Search</span>
+                  <button
+                    type="button"
+                    onClick={() => setMobileSearchOpen(false)}
+                    class="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700"
+                    aria-label="Close search"
+                  >
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                <form
+                  class="p-3 flex flex-col gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    commitVaultSearch();
+                  }}
+                  role="search"
+                >
+                  <input
+                    type="text"
+                    name="q"
+                    placeholder="Search in SecureVault…"
+                    value={searchDraft()}
+                    onInput={(e) => setSearchDraft(e.currentTarget.value)}
+                    ref={(el) => {
+                      mobileSearchField = el;
+                    }}
+                    class="w-full px-3 py-2.5 bg-gray-700/60 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    autocomplete="off"
+                  />
+                  <div class="flex gap-2 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearVaultSearch();
+                        setMobileSearchOpen(false);
+                      }}
+                      class="px-3 py-2 text-sm text-gray-300 hover:text-white"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      type="submit"
+                      class="px-4 py-2 text-sm rounded-lg bg-primary-600 hover:bg-primary-700 text-white"
+                    >
+                      Search
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </Show>
 
           {/* Main Content */}
           <main class="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
@@ -416,6 +548,7 @@ function AppContent() {
                         <Home
                           search={searchApplied()}
                           searchLoading={searchLoading()}
+                          onGoToDrive={() => navigate(hrefWithCurrentSearch(ROUTES.drive))}
                           onOpenFolder={(_folderId, _folderName, uid) => {
                             navigate(hrefWithCurrentSearch(uid ? `/f/${uid}` : ROUTES.drive));
                           }}
@@ -486,6 +619,9 @@ function ProfileSection(props: {
           props.isProfilePage ? 'bg-primary-600 text-white' : 'hover:bg-gray-700 text-gray-300'
         }`}
         title={props.user.displayName || props.user.username}
+        aria-label="Account menu"
+        aria-haspopup="menu"
+        aria-expanded={visible()}
       >
         <div class="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center overflow-hidden shrink-0">
           <Show when={props.user.avatar} fallback={
