@@ -5,6 +5,9 @@ import { publicRequestJson, publicRequestRaw, ApiError } from '../../lib/api';
 import { getFileExtension } from '../../lib/files';
 import { logger } from '../../lib/logger';
 import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../../lib/motion';
+import { blobFromBlobUrlFetchResponse, prefersExplicitSaveStep, saveBlobToDevice } from '../../lib/downloadBlob';
+import { toast } from '../../stores/toast';
+import BlobSavePrompt from '../BlobSavePrompt';
 import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile } from '../FilePreview';
 import {
   base64ToArrayBuffer,
@@ -55,6 +58,7 @@ export default function PublicShare() {
   const [isLoading, setIsLoading] = createSignal(true);
   const [isDownloading, setIsDownloading] = createSignal(false);
   const [downloadingFileId, setDownloadingFileId] = createSignal<string | null>(null);
+  const [pendingBlobSave, setPendingBlobSave] = createSignal<{ blob: Blob; filename: string } | null>(null);
   const [decryptionKey, setDecryptionKey] = createSignal<string | null>(null);
   const [decryptionIv, setDecryptionIv] = createSignal<string | null>(null);
   
@@ -215,63 +219,46 @@ export default function PublicShare() {
   
   const handleDownload = async () => {
     if (!token || !file()) return;
-    
-    setIsDownloading(true);
-    
-    try {
-      // If we already have the preview URL, use it
-      if (previewUrl()) {
-        const a = document.createElement('a');
-        a.href = previewUrl()!;
-        a.download = file()!.filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setIsDownloading(false);
-        return;
-      }
-      
-      // If we have text content, create blob from it
-      if (textContent()) {
-        const blob = new Blob([textContent()!], { type: previewMimeType() || 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = file()!.filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        setIsDownloading(false);
-        return;
-      }
-      
-      const response = await publicRequestRaw(`/public/${token}/download`);
 
+    if (pendingBlobSave()) {
+      toast.warning('Finish saving the current file or cancel first.');
+      return;
+    }
+
+    setIsDownloading(true);
+
+    try {
       let blob: Blob;
-      const key = decryptionKey();
-      const iv = decryptionIv();
-      
-      if (key && iv) {
-        const encryptedData = await response.arrayBuffer();
-        const cryptoKey = await importFileKey(key);
-        const ivBytes = new Uint8Array(base64ToArrayBuffer(iv));
-        const decryptedData = await decryptSharedFile(encryptedData, cryptoKey, ivBytes);
-        
-        const mimeType = getMimeType(file()!.filename);
-        blob = new Blob([decryptedData], { type: mimeType });
+
+      if (previewUrl()) {
+        const mime = previewMimeType() || getMimeType(file()!.filename);
+        const r = await fetch(previewUrl()!);
+        blob = blobFromBlobUrlFetchResponse(await r.blob(), mime);
+      } else if (textContent()) {
+        blob = new Blob([textContent()!], { type: previewMimeType() || 'text/plain' });
       } else {
-        blob = await response.blob();
+        const response = await publicRequestRaw(`/public/${token}/download`);
+        const key = decryptionKey();
+        const iv = decryptionIv();
+
+        if (key && iv) {
+          const encryptedData = await response.arrayBuffer();
+          const cryptoKey = await importFileKey(key);
+          const ivBytes = new Uint8Array(base64ToArrayBuffer(iv));
+          const decryptedData = await decryptSharedFile(encryptedData, cryptoKey, ivBytes);
+          const mimeType = getMimeType(file()!.filename);
+          blob = new Blob([decryptedData], { type: mimeType });
+        } else {
+          blob = await response.blob();
+        }
       }
-      
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = file()!.filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+
+      const fname = file()!.filename;
+      if (prefersExplicitSaveStep()) {
+        setPendingBlobSave({ blob, filename: fname });
+      } else {
+        await saveBlobToDevice(blob, fname);
+      }
     } catch (err: any) {
       logger.error('Download error:', err);
       setError(err.message || 'Download failed - the link may be incomplete');
@@ -283,23 +270,23 @@ export default function PublicShare() {
   // Download a file from a shared folder
   const handleFolderFileDownload = async (item: FolderItem) => {
     if (!token || item.isFolder) return;
-    
+
+    if (pendingBlobSave()) {
+      toast.warning('Finish saving the current file or cancel first.');
+      return;
+    }
+
     setDownloadingFileId(item.id);
-    
+
     try {
       const response = await publicRequestRaw(`/public/${token}/file/${item.id}/download`);
       const blob = await response.blob();
-      
-      // Note: For folder shares, files are downloaded as-is (encrypted)
-      // In a real implementation, you would need to handle decryption
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = item.filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+
+      if (prefersExplicitSaveStep()) {
+        setPendingBlobSave({ blob, filename: item.filename });
+      } else {
+        await saveBlobToDevice(blob, item.filename);
+      }
     } catch (err: any) {
       logger.error('Download error:', err);
       setError(err.message || 'Download failed');
@@ -650,7 +637,12 @@ export default function PublicShare() {
                         <Show when={openMenuId() === item.id}>
                           <div class="absolute right-0 top-full mt-1 w-48 py-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-10">
                             {!item.isFolder && (
-                              <button onClick={(e) => { e.stopPropagation(); handleFolderFileDownload(item); setOpenMenuId(null); }} class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={!!pendingBlobSave() || downloadingFileId() === item.id}
+                                onClick={(e) => { e.stopPropagation(); handleFolderFileDownload(item); setOpenMenuId(null); }}
+                                class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                              >
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                                 Download
                               </button>
@@ -687,7 +679,12 @@ export default function PublicShare() {
                       <Show when={openMenuId() === item.id}>
                         <div class="absolute right-2 top-12 w-40 py-1 bg-[#1e1e1e] border border-gray-700 rounded-lg shadow-xl z-10">
                           {!item.isFolder && (
-                            <button onClick={(e) => { e.stopPropagation(); handleFolderFileDownload(item); setOpenMenuId(null); }} class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={!!pendingBlobSave() || downloadingFileId() === item.id}
+                              onClick={(e) => { e.stopPropagation(); handleFolderFileDownload(item); setOpenMenuId(null); }}
+                              class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                            >
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                             Download
                           </button>
@@ -717,9 +714,10 @@ export default function PublicShare() {
             <h2 class="text-xl font-semibold text-white mb-1 break-all">{file()!.filename}</h2>
             <p class="text-gray-400 text-sm mb-6">{formatSize(file()!.fileSize, { unset: '0 B', zero: '0 B' })}</p>
             <button
+              type="button"
               onClick={handleDownload}
-              disabled={isDownloading()}
-              class="w-full max-w-xs py-3 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 rounded-lg text-white font-medium flex items-center justify-center gap-2 transition-colors"
+              disabled={isDownloading() || !!pendingBlobSave()}
+              class="w-full max-w-xs py-3 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 rounded-lg text-white font-medium flex items-center justify-center gap-2 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
             >
               {isDownloading() ? (
                 <><svg class="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Downloading...</>
@@ -737,6 +735,11 @@ export default function PublicShare() {
       <footer class="py-3 text-center text-gray-600 text-xs border-t border-gray-800">
         🔒 SecureVault • End-to-End Encrypted
       </footer>
+
+      <BlobSavePrompt
+        pending={pendingBlobSave()}
+        onClose={() => setPendingBlobSave(null)}
+      />
     </div>
   );
 }

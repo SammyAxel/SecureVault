@@ -16,6 +16,8 @@ import { ROUTES, hrefWithCurrentSearch } from '../lib/routes';
 import { getFileExtension } from '../lib/files';
 import { logger } from '../lib/logger';
 import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../lib/motion';
+import { blobFromBlobUrlFetchResponse, prefersExplicitSaveStep, saveBlobToDevice } from '../lib/downloadBlob';
+import BlobSavePrompt from './BlobSavePrompt';
 
 interface FileViewerProps {
   uid: string;
@@ -41,6 +43,7 @@ export default function FileViewer(props: FileViewerProps) {
   const [sortBy] = createSignal<'name' | 'type'>('name');
   const [sortOrder, setSortOrder] = createSignal<'asc' | 'desc'>('asc');
   const [openMenuId, setOpenMenuId] = createSignal<string | null>(null);
+  const [pendingBlobSave, setPendingBlobSave] = createSignal<{ blob: Blob; filename: string } | null>(null);
 
   // Load file/folder by UID
   const loadFileByUid = async (uid: string) => {
@@ -133,32 +136,31 @@ export default function FileViewer(props: FileViewerProps) {
       return;
     }
 
+    if (pendingBlobSave()) {
+      toast.warning('Finish saving the current file or cancel first.');
+      return;
+    }
+
     setIsDownloading(true);
     try {
-      // Use existing preview if available
+      let blob: Blob;
       if (previewUrl()) {
-        const a = document.createElement('a');
-        a.href = previewUrl()!;
-        a.download = f.filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        const mime = previewMimeType() || getMimeType(f.filename);
+        const r = await fetch(previewUrl()!);
+        blob = blobFromBlobUrlFetchResponse(await r.blob(), mime);
       } else {
         const { data, encryptedKey, iv } = await api.downloadFile(f.id);
         const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
         const fileKey = await unwrapKey(encryptedKey, privateKey);
         const decrypted = await decryptFile(data, fileKey, base64ToUint8Array(iv));
-
         const mimeType = getMimeType(f.filename);
-        const blob = new Blob([decrypted], { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = f.filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        blob = new Blob([decrypted], { type: mimeType });
+      }
+
+      if (prefersExplicitSaveStep()) {
+        setPendingBlobSave({ blob, filename: f.filename });
+      } else {
+        await saveBlobToDevice(blob, f.filename);
       }
     } catch (err: any) {
       toast.error(`Download failed: ${err.message}`);
@@ -548,9 +550,10 @@ export default function FileViewer(props: FileViewerProps) {
                 </div>
                 <div class="flex items-center gap-3">
                   <button
+                    type="button"
                     onClick={handleDownload}
-                    disabled={isDownloading()}
-                    class="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 text-white rounded-lg font-medium transition-colors"
+                    disabled={isDownloading() || !!pendingBlobSave()}
+                    class="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 text-white rounded-lg font-medium transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
                   >
                     <Show when={isDownloading()} fallback={
                       <>
@@ -590,6 +593,11 @@ export default function FileViewer(props: FileViewerProps) {
           </div>
         </Show>
       </Show>
+
+      <BlobSavePrompt
+        pending={pendingBlobSave()}
+        onClose={() => setPendingBlobSave(null)}
+      />
     </>
   );
 }

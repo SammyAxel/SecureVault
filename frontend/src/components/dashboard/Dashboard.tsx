@@ -12,6 +12,8 @@ import { ROUTES, hrefWithCurrentSearch } from '../../lib/routes';
 import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../../lib/motion';
 import { getFileExtension } from '../../lib/files';
 import { logger } from '../../lib/logger';
+import { prefersExplicitSaveStep, saveBlobToDevice } from '../../lib/downloadBlob';
+import BlobSavePrompt from '../BlobSavePrompt';
 import { TRASH_RETENTION_DAYS } from '../../lib/config';
 import { daysUntilTrashPurge } from '../../lib/trashUi';
 import { openConfirm } from '../../stores/confirm';
@@ -68,6 +70,7 @@ export default function Dashboard(props: DashboardProps) {
   const [loadRetryNonce, setLoadRetryNonce] = createSignal(0);
   const [isDragging, setIsDragging] = createSignal(false);
   const [uploadProgress, setUploadProgress] = createSignal<string | null>(null);
+  const [pendingBlobSave, setPendingBlobSave] = createSignal<{ blob: Blob; filename: string } | null>(null);
   
   // Preview state
   const [previewFile, setPreviewFile] = createSignal<{ url: string; filename: string; mimeType: string; fileUid?: string } | null>(null);
@@ -466,6 +469,11 @@ export default function Dashboard(props: DashboardProps) {
       return;
     }
 
+    if (pendingBlobSave()) {
+      toast.warning('Finish saving the current file or cancel first.');
+      return;
+    }
+
     try {
       setUploadProgress(`Downloading ${file.filename}...`);
 
@@ -481,17 +489,15 @@ export default function Dashboard(props: DashboardProps) {
       // Decrypt file
       const decrypted = await decryptFile(data, fileKey, base64ToUint8Array(iv));
 
-      // Download
       const mimeType = getMimeType(file.filename);
       const blob = new Blob([decrypted], { type: mimeType });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = file.filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+
+      // Mobile: programmatic download after async work often fails (lost user activation).
+      if (prefersExplicitSaveStep()) {
+        setPendingBlobSave({ blob, filename: file.filename });
+      } else {
+        await saveBlobToDevice(blob, file.filename);
+      }
 
       setUploadProgress(null);
     } catch (error: any) {
@@ -1554,8 +1560,10 @@ export default function Dashboard(props: DashboardProps) {
               </Show>
               {section() !== 'trash' && !file.isFolder && (
                 <button
+                  type="button"
+                  disabled={!!pendingBlobSave()}
                   onClick={() => { handleDownload(file); closeActionMenu(); }}
-                  class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
+                  class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                 >
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -1927,6 +1935,11 @@ export default function Dashboard(props: DashboardProps) {
           </div>
         </div>
       </Show>
+
+      <BlobSavePrompt
+        pending={pendingBlobSave()}
+        onClose={() => setPendingBlobSave(null)}
+      />
     </div>
   );
 }
