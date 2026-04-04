@@ -11,7 +11,7 @@ import { setVirusTotalApiKey } from '../lib/virustotal.js';
 import { getStats, deleteFile } from '../lib/storage.js';
 import { checkTrustedDevice, addTrustedDevice, updateTrustedDeviceLastUsed } from './trustedDevices.js';
 import { getClientIp } from '../lib/clientIp.js';
-import { DEMO_MODE, isDemoAdmin } from '../lib/demo.js';
+import { DEMO_MODE, DEMO_USERNAME, isDemoAdmin } from '../lib/demo.js';
 
 const DEFAULT_QUOTA_BYTES = 524288000; // 500MB (same as schema default)
 const ADMIN_QUOTA_BYTES = 5 * 1024 * 1024 * 1024; // 5GB
@@ -51,15 +51,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   
   // ============ CHECK SETUP STATUS ============
   app.get('/api/setup/status', async (request, reply) => {
-    // Check if any admin user exists
     const admins = await db.query.users.findMany({
       where: eq(schema.users.isAdmin, true),
     });
-    
+    // Demo uses a pre-seeded admin; never show first-time setup wizard
+    const needsSetup = DEMO_MODE ? false : admins.length === 0;
+
     return {
       ok: true,
-      needsSetup: admins.length === 0,
+      needsSetup,
       demoMode: DEMO_MODE,
+      ...(DEMO_MODE ? { demoUsername: DEMO_USERNAME } : {}),
     };
   });
 
@@ -69,6 +71,12 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/api/setup/admin', async (request, reply) => {
+    if (DEMO_MODE) {
+      return reply.status(403).send({
+        ok: false,
+        msg: 'Initial setup is disabled in demo mode. Use the pre-seeded demo account and keys.',
+      });
+    }
     // Check if setup is still needed
     const hasAdmin = await db.query.users.findFirst({
       where: eq(schema.users.isAdmin, true),

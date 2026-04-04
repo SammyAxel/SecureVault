@@ -255,6 +255,7 @@ The normal `npm run dev` command also runs both servers but uses your default `b
 | Feature | Detail |
 |---------|--------|
 | Seeded admin | `demo/securevault-demo.db` contains one admin user (`demo_admin`) whose public keys match `frontend/public/demo_admin_keys.json`. |
+| No first-time setup | With `DEMO_MODE=true`, the app skips the setup wizard; `/api/setup/admin` is disabled. The login screen pre-fills the demo username from the server. |
 | Session isolation | `DEMO_MODE=true` tags every uploaded file with the current session id. List/download/trash/share APIs only return files for the active session — different visitors using the same key file cannot see each other's files. |
 | 25 MB cap | Each demo session can upload at most 25 MB total. |
 | Logout cleanup | On logout the backend deletes all files (DB rows + blobs) created by that session. |

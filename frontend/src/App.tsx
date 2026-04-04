@@ -70,6 +70,7 @@ function AppContent() {
   const [mobileNavOpen, setMobileNavOpen] = createSignal(false);
   const [mobileSearchOpen, setMobileSearchOpen] = createSignal(false);
   const [demoMode, setDemoMode] = createSignal(false);
+  const [demoUsername, setDemoUsername] = createSignal<string | undefined>();
   const [tourActive, setTourActive] = createSignal(false);
 
   const driveShellOpen = () => !!user() && !isAdminPage() && !isProfilePage();
@@ -244,6 +245,7 @@ function AppContent() {
         const status = await api.checkSetupStatus();
         setNeedsSetup(status.needsSetup);
         if (status.demoMode) setDemoMode(true);
+        if (status.demoUsername) setDemoUsername(status.demoUsername);
       } catch (err) {
         logger.error('Failed to check setup status:', err);
         setNeedsSetup(false);
@@ -537,6 +539,7 @@ function AppContent() {
                       <Login
                         onSwitchToRegister={() => navigate(ROUTES.register)}
                         isDemoMode={demoMode()}
+                        demoUsername={demoUsername()}
                       />
                     }
                   >

@@ -1,4 +1,4 @@
-import { createSignal, Show } from 'solid-js';
+import { createSignal, Show, createEffect } from 'solid-js';
 import { useAuth } from '../stores/auth';
 import * as api from '../lib/api';
 import {
@@ -15,11 +15,13 @@ interface LoginProps {
   onSwitchToRegister: () => void;
   /** When true, show demo key download below the login card. */
   isDemoMode?: boolean;
+  /** Pre-filled username (e.g. demo_admin from server in demo mode). */
+  demoUsername?: string;
 }
 
 export default function Login(props: LoginProps) {
   const { login } = useAuth();
-  const [username, setUsername] = createSignal('');
+  const [username, setUsername] = createSignal(props.demoUsername ?? '');
   const [, setKeyFile] = createSignal<File | null>(null);
   const [keyBundle, setKeyBundle] = createSignal<KeyBundle | null>(null);
   const [totp, setTotp] = createSignal('');
@@ -28,6 +30,11 @@ export default function Login(props: LoginProps) {
   const [error, setError] = createSignal('');
   const [isLoading, setIsLoading] = createSignal(false);
   const [trustDevice, setTrustDevice] = createSignal(false);
+
+  createEffect(() => {
+    const u = props.demoUsername;
+    if (u) setUsername(u);
+  });
 
   const handleKeyFileChange = async (e: Event) => {
     const input = e.target as HTMLInputElement;
@@ -155,6 +162,8 @@ export default function Login(props: LoginProps) {
               autocomplete="username"
               required
               disabled={requires2FA() && !!challengeData()}
+              readOnly={!!props.demoUsername}
+              title={props.demoUsername ? 'Demo account username' : undefined}
             />
           </div>
 
@@ -237,17 +246,19 @@ export default function Login(props: LoginProps) {
           </button>
         </form>
 
-        <div class="mt-6 text-center">
-          <p class="text-gray-400">
-            Don't have an account?{' '}
-            <button
-              onClick={props.onSwitchToRegister}
-              class="text-primary-400 hover:text-primary-300"
-            >
-              Register
-            </button>
-          </p>
-        </div>
+        <Show when={!props.isDemoMode}>
+          <div class="mt-6 text-center">
+            <p class="text-gray-400">
+              Don't have an account?{' '}
+              <button
+                onClick={props.onSwitchToRegister}
+                class="text-primary-400 hover:text-primary-300"
+              >
+                Register
+              </button>
+            </p>
+          </div>
+        </Show>
       </div>
 
       <Show when={props.isDemoMode}>
@@ -260,7 +271,7 @@ export default function Login(props: LoginProps) {
             Download demo admin keys
           </a>
           <p class="text-gray-500 text-xs text-center max-w-sm">
-            Use username <span class="text-gray-400 font-mono">demo_admin</span> with this file to sign in.
+            Sign in with the downloaded key file (username is set above).
           </p>
         </div>
       </Show>
