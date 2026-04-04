@@ -169,6 +169,90 @@ export async function verifyLogin(
   });
 }
 
+export type DeviceLinkStatus = 'pending' | 'completed' | 'expired' | 'expired_or_invalid';
+
+export async function createDeviceLinkSession() {
+  return request<{
+    ok: boolean;
+    pairingId: string;
+    linkSecret: string;
+    expiresAt: string;
+    username: string;
+    qrCodeDataUrl: string;
+    linkUrl: string;
+  }>('/auth/device-link/create', {
+    method: 'POST',
+    body: '{}',
+  });
+}
+
+export async function getDeviceLinkStatus(pairingId: string) {
+  return request<{ ok: boolean; status: DeviceLinkStatus }>(
+    `/auth/device-link/status?pairingId=${encodeURIComponent(pairingId)}`
+  );
+}
+
+export async function getDeviceLinkChallenge(
+  pairingId: string,
+  linkSecret: string,
+  deviceFingerprint?: string
+) {
+  return publicRequestJson<{
+    ok: boolean;
+    challenge: string;
+    challengeId: string;
+    username: string;
+    requires2FA: boolean;
+  }>('/auth/device-link/challenge', {
+    method: 'POST',
+    body: JSON.stringify({ pairingId, linkSecret, deviceFingerprint }),
+  });
+}
+
+export async function verifyDeviceLink(
+  pairingId: string,
+  linkSecret: string,
+  challengeId: string,
+  signature: string,
+  opts?: {
+    totp?: string;
+    trustDevice?: boolean;
+    deviceFingerprint?: string;
+    deviceName?: string;
+    browser?: string;
+    os?: string;
+    deviceInfo?: string;
+  }
+) {
+  return publicRequestJson<{
+    ok: boolean;
+    token: string;
+    expiresAt: string;
+    user: {
+      id: string;
+      username: string;
+      isAdmin: boolean;
+      storageUsed: number;
+      storageQuota: number;
+    };
+  }>('/auth/device-link/verify', {
+    method: 'POST',
+    body: JSON.stringify({
+      pairingId,
+      linkSecret,
+      challengeId,
+      signature,
+      totp: opts?.totp,
+      trustDevice: opts?.trustDevice,
+      deviceFingerprint: opts?.deviceFingerprint,
+      deviceName: opts?.deviceName,
+      browser: opts?.browser,
+      os: opts?.os,
+      deviceInfo: opts?.deviceInfo,
+    }),
+  });
+}
+
 export async function logout() {
   return request<{ ok: boolean }>('/logout', { method: 'POST' });
 }

@@ -4,6 +4,7 @@ import * as api from '../../lib/api';
 import { toast } from '../../stores/toast';
 import { openConfirm } from '../../stores/confirm';
 import { AvatarCropper } from '../AvatarCropper';
+import DeviceLinkModal from '../DeviceLinkModal';
 import {
   generateKeyBundle,
   downloadKeyBundle,
@@ -360,6 +361,7 @@ function GeneralTab() {
 // ============ SECURITY TAB ============
 function SecurityTab() {
   const { user, updateUser } = useAuth();
+  const [deviceLinkOpen, setDeviceLinkOpen] = createSignal(false);
   const [show2FASetup, setShow2FASetup] = createSignal(false);
   const [qrCode, setQrCode] = createSignal('');
   const [secret, setSecret] = createSignal('');
@@ -445,6 +447,23 @@ function SecurityTab() {
 
   return (
     <div class="space-y-6">
+      <DeviceLinkModal open={deviceLinkOpen()} onClose={() => setDeviceLinkOpen(false)} />
+
+      <div class="bg-gray-800 rounded-xl p-6">
+        <h3 class="text-lg font-semibold mb-1">Link phone or tablet</h3>
+        <p class="text-gray-400 text-sm mb-4">
+          Sign in on a secondary device the same way as WhatsApp Web: this computer stays the main session. The other
+          device must have your <code class="text-gray-300">keys.json</code> file (transfer it securely once).
+        </p>
+        <button
+          type="button"
+          onClick={() => setDeviceLinkOpen(true)}
+          class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors text-sm font-medium"
+        >
+          Show QR code
+        </button>
+      </div>
+
       {/* 2FA Section */}
       <div class="bg-gray-800 rounded-xl p-6">
         <div class="flex items-center justify-between mb-4">

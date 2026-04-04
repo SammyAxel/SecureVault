@@ -13,6 +13,8 @@ import { awaitMinElapsed, MIN_FORM_SUBMIT_MS } from '../lib/motion';
 
 interface LoginProps {
   onSwitchToRegister: () => void;
+  /** Optional: navigate to QR secondary-device login (e.g. `/login/link`). */
+  onGotoQrLogin?: () => void;
 }
 
 export default function Login(props: LoginProps) {
@@ -235,10 +237,26 @@ export default function Login(props: LoginProps) {
           </button>
         </form>
 
-        <div class="mt-6 text-center">
+        <div class="mt-6 text-center space-y-3">
+          <Show when={props.onGotoQrLogin}>
+            <p class="text-gray-400 text-sm">
+              On your phone?{' '}
+              <button
+                type="button"
+                onClick={() => props.onGotoQrLogin?.()}
+                class="text-primary-400 hover:text-primary-300"
+              >
+                Log in with QR link
+              </button>
+              <span class="text-gray-500 block text-xs mt-1">
+                Scan the code from Profile → Security on your computer first.
+              </span>
+            </p>
+          </Show>
           <p class="text-gray-400">
             Don't have an account?{' '}
             <button
+              type="button"
               onClick={props.onSwitchToRegister}
               class="text-primary-400 hover:text-primary-300"
             >

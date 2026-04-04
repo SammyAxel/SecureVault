@@ -11,6 +11,7 @@ import {
 } from 'solid-js';
 import { AuthProvider, useAuth } from './stores/auth.jsx';
 import Login from './components/Login';
+import DeviceLinkLogin from './components/DeviceLinkLogin';
 import Register from './components/Register';
 import Setup from './components/Setup';
 import ToastContainer from './components/Toast';
@@ -199,7 +200,7 @@ function AppContent() {
   // Sync path with login/register view: /login -> Login, /register -> Register
   createEffect(() => {
     const p = path();
-    if (p === ROUTES.login) setShowRegister(false);
+    if (p === ROUTES.login || p === ROUTES.loginLink) setShowRegister(false);
     else if (p === ROUTES.register) setShowRegister(true);
   });
 
@@ -207,7 +208,7 @@ function AppContent() {
   createEffect(() => {
     if (!user()) return;
     const p = path();
-    if (p === ROUTES.login || p === ROUTES.register) navigate(ROUTES.home);
+    if (p === ROUTES.login || p === ROUTES.register || p === ROUTES.loginLink) navigate(ROUTES.home);
   });
 
   // When not logged in and on a protected path, redirect to /login (after session restore finishes)
@@ -496,8 +497,27 @@ function AppContent() {
               <Show
                 when={user()}
                 fallback={
-                  <Show when={showRegister()} fallback={<Login onSwitchToRegister={() => navigate(ROUTES.register)} />}>
-                    <Register onSwitchToLogin={() => navigate(ROUTES.login)} />
+                  <Show
+                    when={path() === ROUTES.loginLink}
+                    fallback={
+                      <Show
+                        when={showRegister()}
+                        fallback={
+                          <Login
+                            onSwitchToRegister={() => navigate(ROUTES.register)}
+                            onGotoQrLogin={() => navigate(ROUTES.loginLink)}
+                          />
+                        }
+                      >
+                        <Register onSwitchToLogin={() => navigate(ROUTES.login)} />
+                      </Show>
+                    }
+                  >
+                    <DeviceLinkLogin
+                      navigate={navigate}
+                      onSwitchToNormalLogin={() => navigate(ROUTES.login)}
+                      onSwitchToRegister={() => navigate(ROUTES.register)}
+                    />
                   </Show>
                 }
               >

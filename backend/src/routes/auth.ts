@@ -1,7 +1,13 @@
-import { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { db, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
-import { generateToken, generateChallenge, getExpiryDate, generateUUID } from '../lib/crypto.js';
+import {
+  generateToken,
+  generateChallenge,
+  getExpiryDate,
+  generateUUID,
+  safeCompare,
+} from '../lib/crypto.js';
 import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
 import { z } from 'zod';
@@ -21,7 +27,36 @@ authenticator.options = {
 };
 
 // Temporary challenge storage (in production, use Redis)
-const pendingChallenges = new Map<string, { challenge: string; expires: number }>();
+const pendingChallenges = new Map<
+  string,
+  { challenge: string; expires: number; deviceLinkPairingId?: string }
+>();
+
+/** WhatsApp-style: PC (authenticated) creates a link; phone scans QR and signs in with the same keys.json */
+type PendingDeviceLink = {
+  linkSecret: string;
+  userId: string;
+  username: string;
+  expires: number;
+  completedAt?: number;
+};
+const pendingDeviceLinks = new Map<string, PendingDeviceLink>();
+
+function getRequestOrigin(request: FastifyRequest): string {
+  const xfProto = request.headers['x-forwarded-proto'];
+  const proto = (Array.isArray(xfProto) ? xfProto[0] : xfProto) || 'http';
+  const xfHost = request.headers['x-forwarded-host'];
+  const host = (Array.isArray(xfHost) ? xfHost[0] : xfHost) || request.headers.host || 'localhost';
+  return `${proto}://${host}`;
+}
+
+function cleanupDeviceLinks(): void {
+  const now = Date.now();
+  for (const [id, link] of pendingDeviceLinks) {
+    if (link.expires < now) pendingDeviceLinks.delete(id);
+    else if (link.completedAt && now - link.completedAt > 10 * 60 * 1000) pendingDeviceLinks.delete(id);
+  }
+}
 
 // Validation schemas
 const registerSchema = z.object({
@@ -37,6 +72,24 @@ const loginChallengeSchema = z.object({
 
 const loginVerifySchema = z.object({
   username: z.string(),
+  signature: z.string(),
+  totp: z.string().optional(),
+  trustDevice: z.boolean().optional(),
+  deviceFingerprint: z.string().optional(),
+  deviceName: z.string().optional(),
+  browser: z.string().optional(),
+  os: z.string().optional(),
+});
+
+const deviceLinkChallengeSchema = z.object({
+  pairingId: z.string().uuid(),
+  linkSecret: z.string().length(64),
+  deviceFingerprint: z.string().optional(),
+});
+
+const deviceLinkVerifySchema = z.object({
+  pairingId: z.string().uuid(),
+  linkSecret: z.string().length(64),
   signature: z.string(),
   totp: z.string().optional(),
   trustDevice: z.boolean().optional(),
@@ -228,7 +281,14 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     if (!challengeData || challengeData.expires < Date.now()) {
       return reply.status(400).send({ ok: false, msg: 'Challenge expired or invalid' });
     }
-    
+
+    if (challengeData.deviceLinkPairingId) {
+      return reply.status(400).send({
+        ok: false,
+        msg: 'This sign-in step is for a QR link from your computer. Open the link on your phone or use Log in with QR.',
+      });
+    }
+
     pendingChallenges.delete(challengeId);
     
     const user = await db.query.users.findFirst({
@@ -327,7 +387,253 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       },
     };
   });
-  
+
+  // ============ DEVICE LINK (QR: main device → secondary) ============
+  app.post('/api/auth/device-link/create', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+    const user = request.user!;
+    cleanupDeviceLinks();
+
+    const pairingId = generateUUID();
+    const linkSecret = generateToken(32);
+    const expires = Date.now() + 3 * 60 * 1000;
+    pendingDeviceLinks.set(pairingId, {
+      linkSecret,
+      userId: user.id,
+      username: user.username,
+      expires,
+    });
+
+    const origin = getRequestOrigin(request).replace(/\/$/, '');
+    const linkUrl = `${origin}/login/link#p=${encodeURIComponent(pairingId)}&s=${encodeURIComponent(linkSecret)}`;
+    const qrCodeDataUrl = await QRCode.toDataURL(linkUrl, { width: 256, margin: 2 });
+
+    await logAudit(
+      user.id,
+      user.username,
+      'DEVICE_LINK_CREATED',
+      'SESSION',
+      pairingId,
+      undefined,
+      getClientIp(request),
+      request.headers['user-agent']
+    );
+
+    return {
+      ok: true,
+      pairingId,
+      linkSecret,
+      expiresAt: new Date(expires).toISOString(),
+      username: user.username,
+      qrCodeDataUrl,
+      linkUrl,
+    };
+  });
+
+  app.get('/api/auth/device-link/status', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+    const pairingId = (request.query as { pairingId?: string }).pairingId;
+    if (!pairingId || typeof pairingId !== 'string') {
+      return reply.status(400).send({ ok: false, msg: 'pairingId query parameter required' });
+    }
+
+    cleanupDeviceLinks();
+    const link = pendingDeviceLinks.get(pairingId);
+    const user = request.user!;
+
+    if (!link) {
+      return { ok: true, status: 'expired_or_invalid' as const };
+    }
+    if (link.userId !== user.id) {
+      return reply.status(403).send({ ok: false, msg: 'Forbidden' });
+    }
+    if (link.expires < Date.now()) {
+      pendingDeviceLinks.delete(pairingId);
+      return { ok: true, status: 'expired' as const };
+    }
+    if (link.completedAt) {
+      return { ok: true, status: 'completed' as const };
+    }
+    return { ok: true, status: 'pending' as const };
+  });
+
+  app.post('/api/auth/device-link/challenge', async (request, reply) => {
+    const body = deviceLinkChallengeSchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid request', errors: body.error.errors });
+    }
+
+    cleanupDeviceLinks();
+    const { pairingId, linkSecret, deviceFingerprint } = body.data;
+    const link = pendingDeviceLinks.get(pairingId);
+    if (!link || link.expires < Date.now()) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid or expired link' });
+    }
+    if (!safeCompare(link.linkSecret, linkSecret)) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid or expired link' });
+    }
+    if (link.completedAt) {
+      return reply.status(400).send({ ok: false, msg: 'This link was already used' });
+    }
+
+    const user = await db.query.users.findFirst({
+      where: eq(schema.users.id, link.userId),
+    });
+    if (!user) {
+      return reply.status(404).send({ ok: false, msg: 'User not found' });
+    }
+    if (user.isSuspended) {
+      return reply.status(403).send({ ok: false, msg: 'Account is suspended' });
+    }
+
+    let isTrustedDevice = false;
+    if (deviceFingerprint && user.totpEnabled) {
+      isTrustedDevice = await checkTrustedDevice(user.id, deviceFingerprint);
+    }
+
+    const challenge = generateChallenge();
+    const challengeId = generateUUID();
+    pendingChallenges.set(challengeId, {
+      challenge,
+      expires: Date.now() + 5 * 60 * 1000,
+      deviceLinkPairingId: pairingId,
+    });
+
+    for (const [id, data] of pendingChallenges) {
+      if (data.expires < Date.now()) pendingChallenges.delete(id);
+    }
+
+    return {
+      ok: true,
+      challenge,
+      challengeId,
+      username: link.username,
+      requires2FA: user.totpEnabled && !isTrustedDevice,
+    };
+  });
+
+  app.post('/api/auth/device-link/verify', async (request, reply) => {
+    const body = deviceLinkVerifySchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid request', errors: body.error.errors });
+    }
+
+    const challengeId = (request.body as { challengeId?: string }).challengeId;
+    if (!challengeId || typeof challengeId !== 'string') {
+      return reply.status(400).send({ ok: false, msg: 'challengeId required' });
+    }
+
+    cleanupDeviceLinks();
+    const { pairingId, linkSecret, signature, totp, trustDevice, deviceFingerprint, deviceName, browser, os } =
+      body.data;
+
+    const link = pendingDeviceLinks.get(pairingId);
+    if (!link || link.expires < Date.now()) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid or expired link' });
+    }
+    if (!safeCompare(link.linkSecret, linkSecret)) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid or expired link' });
+    }
+    if (link.completedAt) {
+      return reply.status(400).send({ ok: false, msg: 'This link was already used' });
+    }
+
+    const challengeData = pendingChallenges.get(challengeId);
+    if (!challengeData || challengeData.expires < Date.now()) {
+      return reply.status(400).send({ ok: false, msg: 'Challenge expired or invalid' });
+    }
+    if (challengeData.deviceLinkPairingId !== pairingId) {
+      return reply.status(400).send({ ok: false, msg: 'Challenge does not match this link' });
+    }
+
+    pendingChallenges.delete(challengeId);
+
+    const user = await db.query.users.findFirst({
+      where: eq(schema.users.id, link.userId),
+    });
+    if (!user) {
+      return reply.status(404).send({ ok: false, msg: 'User not found' });
+    }
+
+    let isTrustedDevice = false;
+    if (deviceFingerprint) {
+      isTrustedDevice = await checkTrustedDevice(user.id, deviceFingerprint);
+      if (isTrustedDevice) {
+        await updateTrustedDeviceLastUsed(user.id, deviceFingerprint);
+      }
+    }
+
+    if (user.totpEnabled && !isTrustedDevice) {
+      if (!totp) {
+        return reply.status(400).send({ ok: false, msg: '2FA code required' });
+      }
+
+      const isValidTotp = authenticator.verify({ token: totp, secret: user.totpSecret! });
+      if (!isValidTotp) {
+        const backupCodes: string[] = user.backupCodes ? JSON.parse(user.backupCodes) : [];
+        const codeIndex = backupCodes.indexOf(totp);
+
+        if (codeIndex === -1) {
+          return reply.status(401).send({ ok: false, msg: 'Invalid 2FA code' });
+        }
+
+        backupCodes.splice(codeIndex, 1);
+        await db
+          .update(schema.users)
+          .set({ backupCodes: JSON.stringify(backupCodes) })
+          .where(eq(schema.users.id, user.id));
+      }
+    }
+
+    if (trustDevice && deviceFingerprint && deviceName && user.totpEnabled && totp) {
+      await addTrustedDevice(
+        user.id,
+        deviceFingerprint,
+        deviceName,
+        browser || null,
+        os || null,
+        getClientIp(request)
+      );
+    }
+
+    const token = generateToken();
+    const expiryHours = isTrustedDevice ? 720 : 24;
+    const expiresAt = getExpiryDate(expiryHours);
+
+    await db.insert(schema.sessions).values({
+      token,
+      userId: user.id,
+      expiresAt,
+      deviceInfo: (request.body as { deviceInfo?: string }).deviceInfo,
+      ipAddress: getClientIp(request),
+      userAgent: request.headers['user-agent'],
+    });
+
+    link.completedAt = Date.now();
+
+    await logAudit(
+      user.id,
+      user.username,
+      'LOGIN',
+      'SESSION',
+      undefined,
+      { method: 'DEVICE_LINK_QR' },
+      getClientIp(request),
+      request.headers['user-agent']
+    );
+
+    return {
+      ok: true,
+      token,
+      expiresAt: expiresAt.toISOString(),
+      user: {
+        id: user.id,
+        username: user.username,
+        isAdmin: user.isAdmin,
+        storageUsed: user.storageUsed,
+        storageQuota: user.storageQuota,
+      },
+    };
+  });
+
   // ============ LOGOUT ============
   app.post('/api/logout', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
