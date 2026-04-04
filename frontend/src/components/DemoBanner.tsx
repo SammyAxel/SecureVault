@@ -2,39 +2,17 @@ import { createSignal, Show } from 'solid-js';
 
 const SURVEY_URL = import.meta.env.VITE_SURVEY_URL as string | undefined;
 
-export default function DemoBanner(props: { onStartTour?: () => void }) {
+/** Shown when logged in during demo mode (survey + dismiss only). */
+export default function DemoBanner() {
   const [dismissed, setDismissed] = createSignal(false);
 
   return (
     <Show when={!dismissed()}>
       <div class="bg-primary-600/90 text-white text-sm">
         <div class="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap">
-          <div class="flex items-center gap-2 min-w-0">
-            <span class="font-semibold shrink-0">Demo Mode</span>
-            <span class="hidden sm:inline text-primary-100">
-              &mdash; Shared admin key &middot; 25 MB per session &middot; files are deleted on logout
-            </span>
-          </div>
+          <span class="font-semibold shrink-0">Demo Mode</span>
 
           <div class="flex items-center gap-2 shrink-0">
-            <a
-              href="/demo_admin_keys.json"
-              download="demo_admin_keys.json"
-              class="px-3 py-1 rounded bg-white/20 hover:bg-white/30 text-xs font-medium"
-            >
-              Download Keys
-            </a>
-
-            <Show when={props.onStartTour}>
-              <button
-                type="button"
-                onClick={() => props.onStartTour?.()}
-                class="px-3 py-1 rounded bg-white/20 hover:bg-white/30 text-xs font-medium"
-              >
-                Tour
-              </button>
-            </Show>
-
             <Show when={SURVEY_URL}>
               <a
                 href={SURVEY_URL}

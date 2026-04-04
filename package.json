@@ -8,6 +8,7 @@
     "postinstall": "npm run install:all",
     "install:all": "cd backend && npm install && cd ../frontend && npm install",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend:wait\"",
+    "dev:demo": "cross-env DEMO_MODE=true DATABASE_URL=../demo/securevault-demo.db concurrently \"npm run dev:backend\" \"npm run dev:frontend:wait\"",
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
     "dev:frontend:wait": "wait-on http://localhost:3000/api/health && npm run dev:frontend",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
+    "cross-env": "^10.1.0",
     "wait-on": "^7.2.0"
   }
 }

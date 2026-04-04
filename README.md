@@ -235,7 +235,20 @@ The `demo` branch ships a public demo profile: a pre-seeded admin account whose 
 docker compose -f docker-compose.demo.yml up --build
 ```
 
-App: http://localhost:3000 — click **Download Keys** in the banner, then log in with username `demo_admin` and the downloaded key file.
+App: http://localhost:3000 — on the login screen use **Download demo admin keys**, then sign in with username `demo_admin` and that file. After login, use **Tour** in the header for the guided walkthrough.
+
+### Local development (demo)
+
+From the repo root, this starts the API and Vite together with `DEMO_MODE` and the seeded database:
+
+```bash
+npm run dev:demo
+```
+
+- Backend: http://localhost:3000  
+- Frontend: http://localhost:5173 (proxies `/api` to the backend)
+
+The normal `npm run dev` command also runs both servers but uses your default `backend/data/securevault.db` and does not enable demo mode unless you set `DEMO_MODE=true` yourself.
 
 ### How it works
 
@@ -246,7 +259,7 @@ App: http://localhost:3000 — click **Download Keys** in the banner, then log i
 | 25 MB cap | Each demo session can upload at most 25 MB total. |
 | Logout cleanup | On logout the backend deletes all files (DB rows + blobs) created by that session. |
 | Registration disabled | `POST /api/register` returns 403 in demo mode. |
-| Interactive tour | A guided overlay (arrows + speech bubbles) starts on first visit and can be re-opened from the demo banner. |
+| Interactive tour | A guided overlay (arrows + speech bubbles) starts on first visit after login; use **Tour** in the header to open it again. |
 | Survey link | Set `VITE_SURVEY_URL` at build time (or in `docker-compose.demo.yml` as a build arg) to show a survey button in the banner. |
 
 ### Regenerating the seed

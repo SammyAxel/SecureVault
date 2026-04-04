@@ -13,6 +13,8 @@ import { awaitMinElapsed, MIN_FORM_SUBMIT_MS } from '../lib/motion';
 
 interface LoginProps {
   onSwitchToRegister: () => void;
+  /** When true, show demo key download below the login card. */
+  isDemoMode?: boolean;
 }
 
 export default function Login(props: LoginProps) {
@@ -247,6 +249,21 @@ export default function Login(props: LoginProps) {
           </p>
         </div>
       </div>
+
+      <Show when={props.isDemoMode}>
+        <div class="mt-6 flex flex-col items-center gap-2">
+          <a
+            href="/demo_admin_keys.json"
+            download="demo_admin_keys.json"
+            class="inline-flex items-center justify-center px-4 py-2.5 rounded-lg bg-gray-700 hover:bg-gray-600 border border-gray-600 text-white text-sm font-medium transition-colors"
+          >
+            Download demo admin keys
+          </a>
+          <p class="text-gray-500 text-xs text-center max-w-sm">
+            Use username <span class="text-gray-400 font-mono">demo_admin</span> with this file to sign in.
+          </p>
+        </div>
+      </Show>
     </div>
   );
 }

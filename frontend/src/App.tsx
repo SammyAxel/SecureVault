@@ -276,8 +276,8 @@ function AppContent() {
       {/* Main app */}
       <Show when={!checkingSetup() && !needsSetup()}>
         <div class="min-h-screen bg-gray-900 animate-sv-rise">
-          <Show when={demoMode()}>
-            <DemoBanner onStartTour={() => setTourActive(true)} />
+          <Show when={demoMode() && !!user()}>
+            <DemoBanner />
           </Show>
 
           {/* Header */}
@@ -370,6 +370,20 @@ function AppContent() {
                 </Show>
 
                 <div class="flex items-center gap-2 sm:gap-4 shrink-0">
+                  <Show when={demoMode()}>
+                    <button
+                      type="button"
+                      onClick={() => setTourActive(true)}
+                      class="p-2 sm:px-3 sm:py-1.5 rounded-lg text-sm flex items-center gap-2 touch-target sm:min-h-0 bg-gray-700 text-gray-300 hover:bg-gray-600"
+                      title="Start guided tour"
+                      aria-label="Start guided tour"
+                    >
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span class="hidden sm:inline">Tour</span>
+                    </button>
+                  </Show>
                   <Show when={!isAdminPage() && !isProfilePage()}>
                     <button
                       type="button"
@@ -517,7 +531,15 @@ function AppContent() {
               <Show
                 when={user()}
                 fallback={
-                  <Show when={showRegister()} fallback={<Login onSwitchToRegister={() => navigate(ROUTES.register)} />}>
+                  <Show
+                    when={showRegister()}
+                    fallback={
+                      <Login
+                        onSwitchToRegister={() => navigate(ROUTES.register)}
+                        isDemoMode={demoMode()}
+                      />
+                    }
+                  >
                     <Register onSwitchToLogin={() => navigate(ROUTES.login)} />
                   </Show>
                 }
