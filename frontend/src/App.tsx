@@ -23,6 +23,8 @@ const PublicShare = lazy(() => import('./components/share/PublicShare'));
 import Sidebar from './components/Sidebar';
 import MobileNavDrawer from './components/MobileNavDrawer';
 import Home from './components/Home';
+import DemoBanner from './components/DemoBanner';
+import DemoTour, { shouldAutoStartTour } from './components/DemoTour';
 import * as api from './lib/api';
 import {
   ROUTES,
@@ -67,6 +69,8 @@ function AppContent() {
   const [routeEntering, setRouteEntering] = createSignal(false);
   const [mobileNavOpen, setMobileNavOpen] = createSignal(false);
   const [mobileSearchOpen, setMobileSearchOpen] = createSignal(false);
+  const [demoMode, setDemoMode] = createSignal(false);
+  const [tourActive, setTourActive] = createSignal(false);
 
   const driveShellOpen = () => !!user() && !isAdminPage() && !isProfilePage();
 
@@ -210,6 +214,14 @@ function AppContent() {
     if (p === ROUTES.login || p === ROUTES.register) navigate(ROUTES.home);
   });
 
+  // Auto-start demo tour on first visit (after login completes and we're on home)
+  createEffect(() => {
+    if (!demoMode() || !user() || isLoading()) return;
+    if (path() === ROUTES.home && shouldAutoStartTour()) {
+      setTimeout(() => setTourActive(true), 600);
+    }
+  });
+
   // When not logged in and on a protected path, redirect to /login (after session restore finishes)
   createEffect(() => {
     if (checkingSetup() || needsSetup()) return;
@@ -231,6 +243,7 @@ function AppContent() {
       try {
         const status = await api.checkSetupStatus();
         setNeedsSetup(status.needsSetup);
+        if (status.demoMode) setDemoMode(true);
       } catch (err) {
         logger.error('Failed to check setup status:', err);
         setNeedsSetup(false);
@@ -263,6 +276,10 @@ function AppContent() {
       {/* Main app */}
       <Show when={!checkingSetup() && !needsSetup()}>
         <div class="min-h-screen bg-gray-900 animate-sv-rise">
+          <Show when={demoMode()}>
+            <DemoBanner onStartTour={() => setTourActive(true)} />
+          </Show>
+
           {/* Header */}
           <header class="bg-gray-800 border-b border-gray-700">
             <div class="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-4 flex items-center justify-between gap-2 flex-wrap">
@@ -281,6 +298,7 @@ function AppContent() {
                 </Show>
               <div
                 class="flex items-center gap-2 sm:gap-3 cursor-pointer min-w-0 shrink-0"
+                data-demo-tour="logo"
                 onClick={() => {
                   clearVaultSearch();
                   if (path() !== ROUTES.home) navigate(ROUTES.home);
@@ -368,6 +386,7 @@ function AppContent() {
                   <Show when={user()?.isAdmin}>
                     <button
                       type="button"
+                      data-demo-tour="admin-btn"
                       onClick={() =>
                         isAdminPage() ? window.history.back() : navigate(ROUTES.admin)
                       }
@@ -388,6 +407,7 @@ function AppContent() {
                   </Show>
 
                   {/* Profile section (Discord-style) with dropdown */}
+                  <span data-demo-tour="profile-btn">
                   <ProfileSection
                     user={user()!}
                     isProfilePage={isProfilePage()}
@@ -395,6 +415,7 @@ function AppContent() {
                     onNavigate={navigate}
                     onLogout={logout}
                   />
+                  </span>
                 </div>
               </Show>
             </div>
@@ -567,6 +588,10 @@ function AppContent() {
               </div>
             </Show>
           </main>
+
+          <Show when={demoMode()}>
+            <DemoTour active={tourActive()} onClose={() => setTourActive(false)} />
+          </Show>
         </div>
       </Show>
     </>

@@ -86,7 +86,7 @@ export async function publicRequestRaw(endpoint: string, init?: RequestInit): Pr
 // ============ SETUP ============
 
 export async function checkSetupStatus() {
-  return request<{ ok: boolean; needsSetup: boolean; userCount: number }>('/setup/status');
+  return request<{ ok: boolean; needsSetup: boolean; userCount: number; demoMode?: boolean }>('/setup/status');
 }
 
 export async function setupAdmin(

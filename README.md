@@ -225,6 +225,55 @@ The [`.gitignore`](.gitignore) excludes typical local and sensitive artifacts, i
 4. **Rate limiting** — reduces brute-force noise on auth routes.  
 5. **Security headers** — Helmet/CSP-style hardening in production.  
 
+## Demo deployment
+
+The `demo` branch ships a public demo profile: a pre-seeded admin account whose key file is served from the app itself, per-session upload limits, and an interactive tour.
+
+### Quick start (Docker)
+
+```bash
+docker compose -f docker-compose.demo.yml up --build
+```
+
+App: http://localhost:3000 — click **Download Keys** in the banner, then log in with username `demo_admin` and the downloaded key file.
+
+### How it works
+
+| Feature | Detail |
+|---------|--------|
+| Seeded admin | `demo/securevault-demo.db` contains one admin user (`demo_admin`) whose public keys match `frontend/public/demo_admin_keys.json`. |
+| Session isolation | `DEMO_MODE=true` tags every uploaded file with the current session id. List/download/trash/share APIs only return files for the active session — different visitors using the same key file cannot see each other's files. |
+| 25 MB cap | Each demo session can upload at most 25 MB total. |
+| Logout cleanup | On logout the backend deletes all files (DB rows + blobs) created by that session. |
+| Registration disabled | `POST /api/register` returns 403 in demo mode. |
+| Interactive tour | A guided overlay (arrows + speech bubbles) starts on first visit and can be re-opened from the demo banner. |
+| Survey link | Set `VITE_SURVEY_URL` at build time (or in `docker-compose.demo.yml` as a build arg) to show a survey button in the banner. |
+
+### Regenerating the seed
+
+If you change the database schema or want fresh keys:
+
+```bash
+npm run demo:seed
+```
+
+This overwrites `frontend/public/demo_admin_keys.json` and `demo/securevault-demo.db`.
+
+### Environment variables (demo-specific)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DEMO_MODE` | Enable demo session isolation + limits | `false` |
+| `DEMO_USERNAME` | Username of the shared demo admin | `demo_admin` |
+| `VITE_DEMO` | Frontend: show demo banner (set at build time) | — |
+| `VITE_SURVEY_URL` | Frontend: Google Form URL for the survey button (set at build time) | — |
+
+### Security note
+
+The published key file means **anyone** can act as admin. Do **not** reuse the demo database, keys, or host for real data.
+
+---
+
 ## Migration from v1
 
 v2 is a full rewrite. There is no automatic import from v1: export anything you need from v1, deploy v2 with a **new** database and storage root, then upload again (files are re-encrypted for v2).

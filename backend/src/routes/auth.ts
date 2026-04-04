@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { db, schema } from '../db/index.js';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { generateToken, generateChallenge, getExpiryDate, generateUUID } from '../lib/crypto.js';
 import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
@@ -8,9 +8,10 @@ import { z } from 'zod';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { logAudit } from './admin.js';
 import { setVirusTotalApiKey } from '../lib/virustotal.js';
-import { getStats } from '../lib/storage.js';
+import { getStats, deleteFile } from '../lib/storage.js';
 import { checkTrustedDevice, addTrustedDevice, updateTrustedDeviceLastUsed } from './trustedDevices.js';
 import { getClientIp } from '../lib/clientIp.js';
+import { DEMO_MODE, isDemoAdmin } from '../lib/demo.js';
 
 const DEFAULT_QUOTA_BYTES = 524288000; // 500MB (same as schema default)
 const ADMIN_QUOTA_BYTES = 5 * 1024 * 1024 * 1024; // 5GB
@@ -58,6 +59,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return {
       ok: true,
       needsSetup: admins.length === 0,
+      demoMode: DEMO_MODE,
     };
   });
 
@@ -130,6 +132,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   // ============ REGISTER ============
   app.post('/api/register', async (request, reply) => {
+    if (DEMO_MODE) {
+      return reply.status(403).send({ ok: false, msg: 'Registration is disabled in demo mode. Please use the demo admin account.' });
+    }
     const body = registerSchema.safeParse(request.body);
     if (!body.success) {
       return reply.status(400).send({ ok: false, msg: 'Invalid request', errors: body.error.errors });
@@ -331,6 +336,37 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   // ============ LOGOUT ============
   app.post('/api/logout', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
+    const sessionId = request.session!.id;
+
+    // Demo mode: purge all files created under this session before deleting it
+    if (isDemoAdmin(request)) {
+      const demoFiles = db.all(sql`
+        SELECT id, storage_path, file_size FROM files
+        WHERE demo_session_id = ${sessionId}
+      `) as { id: string; storage_path: string | null; file_size: number }[];
+
+      let reclaimBytes = 0;
+      for (const f of demoFiles) {
+        if (f.storage_path) await deleteFile(f.storage_path);
+        reclaimBytes += f.file_size || 0;
+      }
+
+      if (demoFiles.length > 0) {
+        const ids = demoFiles.map((f) => f.id);
+        // Delete related shares first (FK), then file rows
+        for (const id of ids) {
+          db.run(sql`DELETE FROM file_shares WHERE file_id = ${id}`);
+          db.run(sql`DELETE FROM public_shares WHERE file_id = ${id}`);
+        }
+        db.run(sql`DELETE FROM files WHERE demo_session_id = ${sessionId}`);
+      }
+
+      if (reclaimBytes > 0) {
+        await db.update(schema.users)
+          .set({ storageUsed: Math.max(0, (user.storageUsed ?? 0) - reclaimBytes) })
+          .where(eq(schema.users.id, user.id));
+      }
+    }
     
     await db.delete(schema.sessions)
       .where(eq(schema.sessions.token, request.session!.token));

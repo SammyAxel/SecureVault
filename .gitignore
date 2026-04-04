@@ -14,6 +14,8 @@ storage/
 *.db-shm
 *.sqlite
 *.sqlite3
+# Exception: demo branch ships a seeded DB
+!demo/securevault-demo.db
 
 # Local config (use storage.json.example as template)
 backend/config/storage.json
@@ -33,6 +35,8 @@ backend/config/storage.json
 *.key
 *_keys.json
 keys.json
+# Exception: demo branch ships a downloadable key file
+!frontend/public/demo_admin_keys.json
 
 # Docker local overrides (machine-specific paths, ports)
 docker-compose.override.yml

@@ -48,6 +48,7 @@ export const files = sqliteTable('files', {
   parentId: text('parent_id').references((): any => files.id, { onDelete: 'cascade' }),
   isDeleted: integer('is_deleted', { mode: 'boolean' }).default(false),
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),
+  demoSessionId: integer('demo_session_id'),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 

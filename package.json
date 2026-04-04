@@ -19,7 +19,8 @@
     "db:generate": "cd backend && npm run db:generate",
     "db:migrate": "cd backend && npm run db:migrate",
     "db:studio": "cd backend && npm run db:studio",
-    "db:setup": "npm run db:generate && npm run db:migrate"
+    "db:setup": "npm run db:generate && npm run db:migrate",
+    "demo:seed": "npx tsx backend/scripts/generate-demo-seed.ts"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",

@@ -9,6 +9,7 @@ import { getTrashRetentionDays, purgeTrashedOlderThanDays } from '../lib/trashRe
 import { z } from 'zod';
 import { logAudit } from './admin.js';
 import { getClientIp } from '../lib/clientIp.js';
+import { isDemoAdmin, demoSessionFilter, DEMO_SESSION_UPLOAD_LIMIT } from '../lib/demo.js';
 
 const createFolderSchema = z.object({
   name: z.string().min(1).max(255),
@@ -68,12 +69,14 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/files', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
     const { parentId } = request.query as { parentId?: string };
+    const dsid = demoSessionFilter(request);
     
     const files = await db.query.files.findMany({
       where: and(
         eq(schema.files.ownerId, user.id),
         eq(schema.files.isDeleted, false),
-        parentId ? eq(schema.files.parentId, parentId) : isNull(schema.files.parentId)
+        parentId ? eq(schema.files.parentId, parentId) : isNull(schema.files.parentId),
+        dsid != null ? eq(schema.files.demoSessionId, dsid) : undefined
       ),
       orderBy: (files: any, { desc }: any) => [desc(files.isFolder), desc(files.createdAt)],
     });
@@ -98,11 +101,13 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/f/:uid', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
     const { uid } = request.params as { uid: string };
+    const dsid = demoSessionFilter(request);
     
     const file = await db.query.files.findFirst({
       where: and(
         eq(schema.files.uid, uid),
-        eq(schema.files.isDeleted, false)
+        eq(schema.files.isDeleted, false),
+        dsid != null ? eq(schema.files.demoSessionId, dsid) : undefined
       ),
     });
     
@@ -226,6 +231,21 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
+    // Demo mode: enforce per-session upload cap
+    const dsid = demoSessionFilter(request);
+    if (dsid != null) {
+      const [row] = db.all(sql`
+        SELECT COALESCE(SUM(file_size), 0) AS total
+        FROM files WHERE demo_session_id = ${dsid}
+      `) as { total: number }[];
+      if ((row?.total ?? 0) + fileSize > DEMO_SESSION_UPLOAD_LIMIT) {
+        return reply.status(400).send({
+          ok: false,
+          msg: `Demo upload limit reached (25 MB per session). You have used ${Math.round((row?.total ?? 0) / 1024 / 1024)} MB.`,
+        });
+      }
+    }
+
     // Save file to storage
     const { relativePath } = await saveFile(user.id, buffer);
     
@@ -242,6 +262,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       storagePath: relativePath,
       fileSize,
       parentId,
+      demoSessionId: dsid,
     });
     
     // Update user storage
@@ -298,10 +319,11 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       uid: folderUid,
       filename: name,
       ownerId: user.id,
-      encryptedKey: '', // Folders don't have encrypted keys
+      encryptedKey: '',
       iv: '',
       isFolder: true,
       parentId: parentId || null,
+      demoSessionId: demoSessionFilter(request),
     });
     
     return { ok: true, folderId, uid: folderUid };
@@ -311,6 +333,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/files/:fileId/download', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
     const { fileId } = request.params as { fileId: string };
+    const dsid = demoSessionFilter(request);
     
     // Check ownership or share access
     const file = await db.query.files.findFirst({
@@ -318,6 +341,11 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     });
     
     if (!file) {
+      return reply.status(404).send({ ok: false, msg: 'File not found' });
+    }
+
+    // Demo isolation: block access to files from other demo sessions
+    if (dsid != null && file.ownerId === user.id && file.demoSessionId !== dsid) {
       return reply.status(404).send({ ok: false, msg: 'File not found' });
     }
     
@@ -364,11 +392,13 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     const { fileId } = request.params as { fileId: string };
     const { permanent } = request.query as { permanent?: string };
     const isPermanent = permanent === 'true';
+    const dsid = demoSessionFilter(request);
     
     const file = await db.query.files.findFirst({
       where: and(
         eq(schema.files.id, fileId),
-        eq(schema.files.ownerId, user.id)
+        eq(schema.files.ownerId, user.id),
+        dsid != null ? eq(schema.files.demoSessionId, dsid) : undefined
       ),
     });
     
@@ -440,12 +470,14 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/files/:fileId/restore', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
     const { fileId } = request.params as { fileId: string };
+    const dsid = demoSessionFilter(request);
     
     const file = await db.query.files.findFirst({
       where: and(
         eq(schema.files.id, fileId),
         eq(schema.files.ownerId, user.id),
-        eq(schema.files.isDeleted, true)
+        eq(schema.files.isDeleted, true),
+        dsid != null ? eq(schema.files.demoSessionId, dsid) : undefined
       ),
     });
     
@@ -480,6 +512,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   // ============ GET TRASH ============
   app.get('/api/trash', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
+    const dsid = demoSessionFilter(request);
 
     // Auto-purge items older than retention window.
     await purgeTrashedOlderThanDays({
@@ -493,7 +526,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     const files = await db.query.files.findMany({
       where: and(
         eq(schema.files.ownerId, user.id),
-        eq(schema.files.isDeleted, true)
+        eq(schema.files.isDeleted, true),
+        dsid != null ? eq(schema.files.demoSessionId, dsid) : undefined
       ),
       orderBy: (files: any, { desc }: any) => [desc(files.deletedAt)],
     });
@@ -514,6 +548,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   // ============ EMPTY TRASH (Permanent Delete All) ============
   app.delete('/api/trash/empty', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
+    const dsid = demoSessionFilter(request);
 
     // Ensure expired items don't count toward the confirmation expectation
     await purgeTrashedOlderThanDays({
@@ -527,7 +562,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     const trashed = await db.query.files.findMany({
       where: and(
         eq(schema.files.ownerId, user.id),
-        eq(schema.files.isDeleted, true)
+        eq(schema.files.isDeleted, true),
+        dsid != null ? eq(schema.files.demoSessionId, dsid) : undefined
       ),
     });
 
@@ -545,11 +581,11 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
 
     const totalSizeToReclaim = trashed.reduce((sum, f) => sum + (f.fileSize || 0), 0);
 
-    // Delete all trashed rows for this user (child rows are included since they are individually marked deleted too)
-    await db.delete(schema.files).where(and(
-      eq(schema.files.ownerId, user.id),
-      eq(schema.files.isDeleted, true)
-    ));
+    // Delete trashed rows (scoped to demo session when applicable)
+    const trashIds = trashed.map((f) => f.id);
+    if (trashIds.length > 0) {
+      await db.delete(schema.files).where(inArray(schema.files.id, trashIds));
+    }
 
     // Update storage used
     await db.update(schema.users)
@@ -574,6 +610,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/api/files/:fileId/rename', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
     const { fileId } = request.params as { fileId: string };
+    const dsid = demoSessionFilter(request);
     
     const body = renameSchema.safeParse(request.body);
     if (!body.success) {
@@ -586,7 +623,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       where: and(
         eq(schema.files.id, fileId),
         eq(schema.files.ownerId, user.id),
-        eq(schema.files.isDeleted, false)
+        eq(schema.files.isDeleted, false),
+        dsid != null ? eq(schema.files.demoSessionId, dsid) : undefined
       ),
     });
     
@@ -605,6 +643,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/api/files/:fileId/move', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
     const { fileId } = request.params as { fileId: string };
+    const dsid = demoSessionFilter(request);
     
     const body = moveSchema.safeParse(request.body);
     if (!body.success) {
@@ -617,7 +656,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       where: and(
         eq(schema.files.id, fileId),
         eq(schema.files.ownerId, user.id),
-        eq(schema.files.isDeleted, false)
+        eq(schema.files.isDeleted, false),
+        dsid != null ? eq(schema.files.demoSessionId, dsid) : undefined
       ),
     });
     
@@ -670,12 +710,14 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   // ============ GET ALL FOLDERS (for move dialog) ============
   app.get('/api/folders', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
+    const dsid = demoSessionFilter(request);
     
     const folders = await db.query.files.findMany({
       where: and(
         eq(schema.files.ownerId, user.id),
         eq(schema.files.isFolder, true),
-        eq(schema.files.isDeleted, false)
+        eq(schema.files.isDeleted, false),
+        dsid != null ? eq(schema.files.demoSessionId, dsid) : undefined
       ),
       orderBy: (files: any, { asc }: any) => [asc(files.filename)],
     });

@@ -211,5 +211,18 @@ if (tableList.length === 0) {
   }
 }
 
+// Migration 5: Add 'demo_session_id' column to files table (demo mode isolation)
+if (!hasColumn('files', 'demo_session_id')) {
+  libLogger.info('Running migration: Adding demo_session_id column to files table');
+  try {
+    db.exec('ALTER TABLE files ADD COLUMN demo_session_id INTEGER');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_files_demo_session ON files(demo_session_id)');
+    libLogger.info('Migration successful: demo_session_id column added');
+  } catch (error) {
+    libLogger.error({ err: error }, 'Migration failed (demo_session_id)');
+    throw error;
+  }
+}
+
 libLogger.info('All database migrations completed');
 db.close();

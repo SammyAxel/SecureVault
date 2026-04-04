@@ -22,10 +22,11 @@ export default function DriveNavPanel(props: {
     props.afterNavigate?.();
   };
 
-  const NavItem = (p: { id: DriveSection; label: string; icon: any }) => (
+  const NavItem = (p: { id: DriveSection; label: string; icon: any; tourId?: string }) => (
     <button
       type="button"
       onClick={() => go(p.id)}
+      data-demo-tour={p.tourId}
       class={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 ease-out ${
         props.active === p.id
           ? 'bg-primary-600/20 text-primary-200 ring-1 ring-primary-500/40'
@@ -56,6 +57,7 @@ export default function DriveNavPanel(props: {
           <NavItem
             id="drive"
             label="My Drive"
+            tourId="sidebar-drive"
             icon={
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -65,6 +67,7 @@ export default function DriveNavPanel(props: {
           <NavItem
             id="shared"
             label="Shared with me"
+            tourId="sidebar-shared"
             icon={
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -74,6 +77,7 @@ export default function DriveNavPanel(props: {
           <NavItem
             id="trash"
             label="Trash"
+            tourId="sidebar-trash"
             icon={
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
