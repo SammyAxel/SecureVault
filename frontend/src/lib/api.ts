@@ -158,6 +158,7 @@ export async function verifyLogin(
       isAdmin: boolean;
       storageUsed: number;
       storageQuota: number;
+      demoMode?: boolean;
     };
   }>('/auth/verify', {
     method: 'POST',
@@ -192,6 +193,7 @@ export async function getCurrentUser() {
       displayName?: string;
       avatar?: string;
       createdAt?: string;
+      demoMode?: boolean;
     };
   }>('/me');
 }
@@ -541,12 +543,13 @@ export interface UserSession {
 }
 
 export async function getAdminStats() {
-  return request<{ ok: boolean; stats: AdminStats }>('/admin/stats');
+  return request<{ ok: boolean; demoMode?: boolean; stats: AdminStats }>('/admin/stats');
 }
 
 export async function getAdminUsers(page = 1, limit = 20) {
   return request<{
     ok: boolean;
+    demoMode?: boolean;
     users: AdminUser[];
     pagination: {
       page: number;

@@ -15,6 +15,8 @@ export interface User {
   storageQuota: number;
   totpEnabled: boolean;
   createdAt?: string;
+  /** True when the server runs with DEMO_MODE (restricted UI and APIs). */
+  demoMode?: boolean;
 }
 
 interface AuthContextValue {

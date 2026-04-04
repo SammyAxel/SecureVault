@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { db, schema } from '../db/index.js';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { generateToken, generateChallenge, getExpiryDate, generateUUID } from '../lib/crypto.js';
 import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
@@ -337,6 +337,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         isAdmin: user.isAdmin,
         storageUsed: user.storageUsed,
         storageQuota: user.storageQuota,
+        demoMode: DEMO_MODE,
       },
     };
   });
@@ -410,6 +411,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         storageQuota: user.storageQuota,
         totpEnabled: user.totpEnabled,
         createdAt: user.createdAt,
+        demoMode: DEMO_MODE,
       },
     };
   });
@@ -557,11 +559,16 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/sessions', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
     const currentToken = request.session!.token;
-    
+    const currentSessionId = request.session!.id;
+
+    // Shared demo account: everyone uses the same user — only expose this browser's session,
+    // not other visitors' sessions.
     const sessions = await db.query.sessions.findMany({
-      where: eq(schema.sessions.userId, user.id),
+      where: isDemoAdmin(request)
+        ? and(eq(schema.sessions.userId, user.id), eq(schema.sessions.id, currentSessionId))
+        : eq(schema.sessions.userId, user.id),
     });
-    
+
     return {
       ok: true,
       sessions: sessions.map((s: any) => ({
@@ -578,6 +585,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   // ============ REVOKE SESSION ============
   app.delete('/api/sessions/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+    if (DEMO_MODE) {
+      return reply.status(403).send({ ok: false, msg: 'Session management is disabled in demo mode' });
+    }
     const user = request.user!;
     const { id } = request.params as { id: string };
     
@@ -609,6 +619,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   // ============ REVOKE ALL OTHER SESSIONS ============
   app.post('/api/sessions/revoke-all', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+    if (DEMO_MODE) {
+      return reply.status(403).send({ ok: false, msg: 'Session management is disabled in demo mode' });
+    }
     const user = request.user!;
     const currentToken = request.session!.token;
     
@@ -642,9 +655,12 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   // ============ DELETE ACCOUNT ============
   app.delete('/api/account', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+    if (DEMO_MODE) {
+      return reply.status(403).send({ ok: false, msg: 'Account deletion is disabled in demo mode' });
+    }
     const user = request.user!;
     const { confirmation } = request.body as { confirmation: string };
-    
+
     if (confirmation !== user.username) {
       return reply.status(400).send({ ok: false, msg: 'Please type your username to confirm' });
     }

@@ -1,4 +1,4 @@
-import { createSignal, For, Show, onMount } from 'solid-js';
+import { createSignal, createEffect, For, Show, onMount } from 'solid-js';
 import { useAuth } from '../../stores/auth';
 import * as api from '../../lib/api';
 import { toast } from '../../stores/toast';
@@ -18,12 +18,20 @@ interface ProfileProps {
 type ProfileTab = 'general' | 'security' | 'sessions' | 'danger';
 
 export default function Profile(props: ProfileProps) {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
+  const isDemo = () => user()?.demoMode === true;
   const [activeTab, setActiveTab] = createSignal<ProfileTab>('general');
   const [tabVisible, setTabVisible] = createSignal(true);
   let tabTimeout: ReturnType<typeof setTimeout> | undefined;
 
+  createEffect(() => {
+    if (isDemo() && activeTab() === 'danger') {
+      setActiveTab('general');
+    }
+  });
+
   const switchTab = (tab: ProfileTab) => {
+    if (isDemo() && tab === 'danger') return;
     if (tab === activeTab()) return;
     if (tabTimeout) clearTimeout(tabTimeout);
     setTabVisible(false);
@@ -49,7 +57,7 @@ export default function Profile(props: ProfileProps) {
         <h1 class="text-xl sm:text-2xl font-bold truncate">Profile Settings</h1>
       </div>
 
-      {/* Tabs: scroll horizontally on mobile */}
+      {/* Tabs: demo hides Danger Zone (delete account); sessions are view-only in demo */}
       <div class="flex gap-2 mb-6 border-b border-gray-700 overflow-x-auto overflow-y-hidden flex-nowrap min-w-0 -mx-px">
         <TabButton 
           active={activeTab() === 'general'} 
@@ -78,16 +86,18 @@ export default function Profile(props: ProfileProps) {
         >
           Sessions
         </TabButton>
-        <TabButton 
-          active={activeTab() === 'danger'} 
-          onClick={() => switchTab('danger')}
-          icon={<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>}
-          danger
-        >
-          Danger Zone
-        </TabButton>
+        <Show when={!isDemo()}>
+          <TabButton 
+            active={activeTab() === 'danger'} 
+            onClick={() => switchTab('danger')}
+            icon={<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>}
+            danger
+          >
+            Danger Zone
+          </TabButton>
+        </Show>
       </div>
 
       {/* Tab Content — animated fade+rise between panels */}
@@ -101,7 +111,7 @@ export default function Profile(props: ProfileProps) {
         <Show when={activeTab() === 'sessions'}>
           <SessionsTab />
         </Show>
-        <Show when={activeTab() === 'danger'}>
+        <Show when={activeTab() === 'danger' && !isDemo()}>
           <DangerTab onLogout={logout} />
         </Show>
       </div>
@@ -615,6 +625,8 @@ function SecurityTab() {
 
 // ============ SESSIONS TAB ============
 function SessionsTab() {
+  const { user } = useAuth();
+  const isDemo = () => user()?.demoMode === true;
   const [sessions, setSessions] = createSignal<api.SessionInfo[]>([]);
   const [isLoading, setIsLoading] = createSignal(true);
 
@@ -637,6 +649,10 @@ function SessionsTab() {
   };
 
   const revokeSession = async (id: number) => {
+    if (isDemo()) {
+      toast.error('Revoking sessions is disabled in demo mode');
+      return;
+    }
     try {
       await api.revokeSession(id);
       setSessions(sessions().filter(s => s.id !== id));
@@ -647,6 +663,10 @@ function SessionsTab() {
   };
 
   const revokeAllOthers = async () => {
+    if (isDemo()) {
+      toast.error('Revoking sessions is disabled in demo mode');
+      return;
+    }
     openConfirm({
       title: 'Revoke All Other Sessions?',
       message: 'This will log you out from all other devices. Only your current session will remain active.',
@@ -693,6 +713,12 @@ function SessionsTab() {
   return (
     <div class="space-y-6">
       <div class="bg-gray-800 rounded-xl p-6">
+        <Show when={isDemo()}>
+          <div class="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200/90 text-sm">
+            Demo: only this browser's session is listed so you don't see other visitors' sessions on the shared account. Revoking sessions is disabled.
+          </div>
+        </Show>
+
         <div class="flex items-center justify-between mb-4">
           <div>
             <h3 class="text-lg font-semibold">Active Sessions</h3>
@@ -701,8 +727,11 @@ function SessionsTab() {
             </p>
           </div>
           <button
+            type="button"
             onClick={revokeAllOthers}
-            class="px-4 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded-lg transition-colors text-sm"
+            disabled={isDemo()}
+            title={isDemo() ? 'Disabled in demo mode' : undefined}
+            class="px-4 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded-lg transition-colors text-sm disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-600/20"
           >
             Revoke All Others
           </button>
@@ -746,9 +775,11 @@ function SessionsTab() {
                     
                     <Show when={!session.isCurrent}>
                       <button
+                        type="button"
                         onClick={() => revokeSession(session.id)}
-                        class="p-2 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors"
-                        title="Revoke session"
+                        disabled={isDemo()}
+                        title={isDemo() ? 'Disabled in demo mode' : 'Revoke session'}
+                        class="p-2 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                       >
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -826,6 +857,7 @@ function DangerTab(props: { onLogout: () => void }) {
         </div>
 
         <button
+          type="button"
           onClick={handleDeleteAccount}
           disabled={isDeleting() || confirmation() !== user()?.username}
           class="px-6 py-3 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white font-medium rounded-lg transition-colors"

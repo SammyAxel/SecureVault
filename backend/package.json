@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "dev:demo": "cross-env DEMO_MODE=true DATABASE_URL=../demo/securevault-demo.db npm run dev",
     "build": "tsc",
     "start": "node dist/server.js",
     "db:generate": "drizzle-kit generate",
@@ -29,6 +30,7 @@
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^20.11.0",
     "@types/qrcode": "^1.5.5",
+    "cross-env": "^10.1.0",
     "drizzle-kit": "^0.24.0",
     "pino-pretty": "^11.0.0",
     "tsx": "^4.7.0",

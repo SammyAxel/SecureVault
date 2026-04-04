@@ -12,6 +12,7 @@ type TabType = 'overview' | 'users' | 'audit' | 'settings';
 
 export default function AdminDashboard() {
   const { user } = useAuth();
+  const isDemo = () => user()?.demoMode === true;
   const [activeTab, setActiveTab] = createSignal<TabType>('overview');
   const [tabVisible, setTabVisible] = createSignal(true);
   let tabTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -304,6 +305,9 @@ export default function AdminDashboard() {
   const adminFormatSize = (bytes: number) =>
     formatSize(bytes, { withTb: true, fractionDigits: 2 });
 
+  const demoStorageLabel = (_bytes: number) => (isDemo() ? 'xxx' : adminFormatSize(_bytes));
+  const demoNumLabel = (n: number) => (isDemo() ? 'xxx' : String(n));
+
   // Format date
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleString();
@@ -316,10 +320,16 @@ export default function AdminDashboard() {
       loadStats();
     } else if (tab === 'users') {
       loadUsers(1);
-    } else if (tab === 'audit') {
+    } else if (tab === 'audit' && !isDemo()) {
       loadAuditLogs(1);
     } else if (tab === 'settings') {
       loadAdminSettings();
+    }
+  });
+
+  createEffect(() => {
+    if (isDemo() && activeTab() === 'audit') {
+      setActiveTab('overview');
     }
   });
 
@@ -329,7 +339,11 @@ export default function AdminDashboard() {
       <div class="flex items-center justify-between mb-6">
         <div>
           <h2 class="text-2xl font-bold text-white">Admin Dashboard</h2>
-          <p class="text-gray-400 mt-1">Manage users, view statistics, and audit logs</p>
+          <p class="text-gray-400 mt-1">
+            {isDemo()
+              ? 'Manage users and view statistics (demo: sensitive metrics hidden)'
+              : 'Manage users, view statistics, and audit logs'}
+          </p>
         </div>
         <button
           type="button"
@@ -365,16 +379,18 @@ export default function AdminDashboard() {
         >
           User Management
         </button>
-        <button
-          onClick={() => switchTab('audit')}
-          class={`px-4 py-3 text-sm font-medium border-b-2 transition-all duration-200 ${
-            activeTab() === 'audit'
-              ? 'border-primary-500 text-primary-400'
-              : 'border-transparent text-gray-400 hover:text-white'
-          }`}
-        >
-          Audit Logs
-        </button>
+        <Show when={!isDemo()}>
+          <button
+            onClick={() => switchTab('audit')}
+            class={`px-4 py-3 text-sm font-medium border-b-2 transition-all duration-200 ${
+              activeTab() === 'audit'
+                ? 'border-primary-500 text-primary-400'
+                : 'border-transparent text-gray-400 hover:text-white'
+            }`}
+          >
+            Audit Logs
+          </button>
+        </Show>
         <button
           onClick={() => switchTab('settings')}
           class={`px-4 py-3 text-sm font-medium border-b-2 transition-all duration-200 ${
@@ -418,7 +434,7 @@ export default function AdminDashboard() {
               </div>
               <div>
                 <p class="text-gray-400 text-sm">Active Sessions</p>
-                <p class="text-2xl font-bold text-white">{stats()?.activeSessions || 0}</p>
+                <p class="text-2xl font-bold text-white">{demoNumLabel(stats()?.activeSessions || 0)}</p>
               </div>
             </div>
           </div>
@@ -433,14 +449,14 @@ export default function AdminDashboard() {
               </div>
               <div>
                 <p class="text-gray-400 text-sm">Total Storage Used</p>
-                <p class="text-2xl font-bold text-white">{adminFormatSize(stats()?.totalStorage || 0)}</p>
+                <p class="text-2xl font-bold text-white">{demoStorageLabel(stats()?.totalStorage || 0)}</p>
                 <p class="text-gray-500 text-xs mt-0.5">by all users</p>
               </div>
             </div>
           </div>
 
           {/* Filesystem: sisa storage */}
-          <Show when={stats()?.storageBackend}>
+          <Show when={stats()?.storageBackend || isDemo()}>
             <div class="bg-gray-800 rounded-xl p-6">
               <div class="flex items-center gap-4">
                 <div class="w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center">
@@ -450,8 +466,18 @@ export default function AdminDashboard() {
                 </div>
                 <div>
                   <p class="text-gray-400 text-sm">Filesystem (storage backend)</p>
-                  <p class="text-2xl font-bold text-white">{adminFormatSize(stats()!.storageBackend!.free)} free</p>
-                  <p class="text-gray-500 text-xs mt-0.5">of {adminFormatSize(stats()!.storageBackend!.total)} total</p>
+                  <Show
+                    when={!isDemo() && !!stats()?.storageBackend}
+                    fallback={
+                      <>
+                        <p class="text-2xl font-bold text-white">xxx free</p>
+                        <p class="text-gray-500 text-xs mt-0.5">of xxx total</p>
+                      </>
+                    }
+                  >
+                    <p class="text-2xl font-bold text-white">{adminFormatSize(stats()!.storageBackend!.free)} free</p>
+                    <p class="text-gray-500 text-xs mt-0.5">of {adminFormatSize(stats()!.storageBackend!.total)} total</p>
+                  </Show>
                 </div>
               </div>
             </div>
@@ -529,8 +555,8 @@ export default function AdminDashboard() {
                       </td>
                       <td class="px-4 py-3">
                         <div class="text-sm">
-                          <p class="text-white">{adminFormatSize(u.storageUsed)}</p>
-                          <p class="text-gray-500">of {adminFormatSize(u.storageQuota)}</p>
+                          <p class="text-white">{demoStorageLabel(u.storageUsed)}</p>
+                          <p class="text-gray-500">of {demoStorageLabel(u.storageQuota)}</p>
                         </div>
                       </td>
                       <td class="px-4 py-3">
@@ -552,16 +578,18 @@ export default function AdminDashboard() {
                       </td>
                       <td class="px-4 py-3 text-right">
                         <div class="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => viewSessions(u)}
-                            class="p-2 text-gray-400 hover:text-primary-400 rounded-lg hover:bg-gray-700"
-                            title="View Sessions"
-                          >
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                            </svg>
-                          </button>
+                          <Show when={!isDemo()}>
+                            <button
+                              onClick={() => viewSessions(u)}
+                              class="p-2 text-gray-400 hover:text-primary-400 rounded-lg hover:bg-gray-700"
+                              title="View Sessions"
+                            >
+                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                              </svg>
+                            </button>
+                          </Show>
                           <button
                             onClick={() => openQuotaModal(u)}
                             class="p-2 text-gray-400 hover:text-yellow-400 rounded-lg hover:bg-gray-700"
@@ -625,7 +653,7 @@ export default function AdminDashboard() {
       </Show>
 
       {/* Audit Logs Tab */}
-      <Show when={activeTab() === 'audit'}>
+      <Show when={activeTab() === 'audit' && !isDemo()}>
         <div class="bg-gray-800 rounded-xl overflow-hidden">
           <Show when={isLoading()}>
             <div class="flex items-center justify-center py-12">
@@ -1120,7 +1148,7 @@ export default function AdminDashboard() {
             </div>
             <div class="p-6">
               <p class="text-gray-400 text-sm mb-4">
-                Current usage: {adminFormatSize(quotaUser()?.storageUsed || 0)}
+                Current usage: {demoStorageLabel(quotaUser()?.storageUsed || 0)}
               </p>
               <label class="block text-sm text-gray-400 mb-2">New quota (MB)</label>
               <input

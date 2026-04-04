@@ -17,6 +17,7 @@ import {
 } from '../lib/malwarebazaar.js';
 import { getStats } from '../lib/storage.js';
 import { getClientIp } from '../lib/clientIp.js';
+import { DEMO_MODE } from '../lib/demo.js';
 import { libLogger } from '../lib/logger.js';
 import { z } from 'zod';
 
@@ -214,6 +215,21 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     // Backend filesystem capacity (total storage follows disk/mount)
     const storageBackend = await getStats();
 
+    if (DEMO_MODE) {
+      return {
+        ok: true,
+        demoMode: true,
+        stats: {
+          totalUsers,
+          totalStorage: 0,
+          activeSessions: 0,
+          totalFiles,
+          suspendedUsers,
+          storageBackend: null,
+        },
+      };
+    }
+
     return {
       ok: true,
       stats: {
@@ -256,20 +272,23 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       .from(schema.users)
       .where(searchFilter ?? sql`1`);
     const total = totalResult?.count || 0;
-    
+
+    const mapUser = (u: any) => ({
+      id: u.id,
+      username: u.username,
+      isAdmin: u.isAdmin,
+      isSuspended: u.isSuspended,
+      suspendedAt: u.suspendedAt,
+      storageUsed: DEMO_MODE ? 0 : u.storageUsed,
+      storageQuota: DEMO_MODE ? 0 : u.storageQuota,
+      totpEnabled: u.totpEnabled,
+      createdAt: u.createdAt,
+    });
+
     return {
       ok: true,
-      users: users.map((u: any) => ({
-        id: u.id,
-        username: u.username,
-        isAdmin: u.isAdmin,
-        isSuspended: u.isSuspended,
-        suspendedAt: u.suspendedAt,
-        storageUsed: u.storageUsed,
-        storageQuota: u.storageQuota,
-        totpEnabled: u.totpEnabled,
-        createdAt: u.createdAt,
-      })),
+      demoMode: DEMO_MODE || undefined,
+      users: users.map(mapUser),
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -397,11 +416,25 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       action?: string;
       username?: string;
     };
-    
+
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const offset = (pageNum - 1) * limitNum;
-    
+
+    if (DEMO_MODE) {
+      return {
+        ok: true,
+        demoMode: true,
+        logs: [] as unknown[],
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total: 0,
+          totalPages: 0,
+        },
+      };
+    }
+
     const logs = await db.query.auditLogs.findMany({
       orderBy: (logs: any, { desc }: any) => [desc(logs.createdAt)],
       limit: limitNum,
@@ -443,6 +476,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     }
     const targetUserId = idParsed.data;
 
+    if (DEMO_MODE) {
+      return { ok: true, demoMode: true, sessions: [] };
+    }
+
     const sessions = await db.query.sessions.findMany({
       where: eq(schema.sessions.userId, targetUserId),
       orderBy: (sessions: any, { desc }: any) => [desc(sessions.createdAt)],
@@ -467,6 +504,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   
   // ============ REVOKE USER SESSION (Admin) ============
   app.delete('/api/admin/sessions/:sessionId', { preHandler: requireAdmin }, async (request: AuthenticatedRequest, reply) => {
+    if (DEMO_MODE) {
+      return reply.status(403).send({ ok: false, msg: 'Session management is disabled in demo mode' });
+    }
     const admin = request.user!;
     const { sessionId } = request.params as { sessionId: string };
     const sessionIdNum = parseInt(sessionId);
