@@ -1,6 +1,8 @@
 import { createSignal, Show, createEffect, onCleanup } from 'solid-js';
+import QRCode from 'qrcode';
 import * as api from '../lib/api';
 import { toast } from '../stores/toast';
+import { getCurrentKeys, encryptKeyBundleForTransfer } from '../lib/crypto';
 
 interface DeviceLinkModalProps {
   open: boolean;
@@ -43,10 +45,27 @@ export default function DeviceLinkModal(props: DeviceLinkModalProps) {
 
     (async () => {
       try {
-        const res = await api.createDeviceLinkSession();
+        const keys = getCurrentKeys();
+        let encOpts: { encryptedKeys?: string; encryptedKeysIv?: string; transferKey?: string } = {};
+        if (keys) {
+          const enc = await encryptKeyBundleForTransfer(keys);
+          encOpts = { encryptedKeys: enc.encryptedKeys, encryptedKeysIv: enc.iv, transferKey: enc.transferKey };
+        }
+
+        const res = await api.createDeviceLinkSession({
+          encryptedKeys: encOpts.encryptedKeys,
+          encryptedKeysIv: encOpts.encryptedKeysIv,
+        });
         if (cancelled) return;
-        setQrCode(res.qrCodeDataUrl);
-        setLinkUrl(res.linkUrl);
+
+        const baseLinkUrl = `${window.location.origin}/login/link#p=${encodeURIComponent(res.pairingId)}&s=${encodeURIComponent(res.linkSecret)}`;
+        const fullLinkUrl = encOpts.transferKey
+          ? `${baseLinkUrl}&k=${encodeURIComponent(encOpts.transferKey)}`
+          : baseLinkUrl;
+
+        const qrDataUrl = await QRCode.toDataURL(fullLinkUrl, { width: 256, margin: 2 });
+        setQrCode(qrDataUrl);
+        setLinkUrl(fullLinkUrl);
         setPairingId(res.pairingId);
         setExpiresAt(res.expiresAt);
 
@@ -118,8 +137,7 @@ export default function DeviceLinkModal(props: DeviceLinkModalProps) {
           </div>
 
           <p class="text-sm text-gray-400 mb-4">
-            Main device (this computer) stays signed in. Scan the QR code on your phone, then choose your{' '}
-            <span class="text-gray-300">keys.json</span> file on the phone to finish signing in — same as WhatsApp Web.
+            Scan this QR code on your phone to sign in instantly. Your encryption keys are transferred securely — no file needed on the phone.
           </p>
 
           <Show when={loading()}>

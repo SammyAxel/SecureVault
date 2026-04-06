@@ -171,7 +171,10 @@ export async function verifyLogin(
 
 export type DeviceLinkStatus = 'pending' | 'completed' | 'expired' | 'expired_or_invalid';
 
-export async function createDeviceLinkSession() {
+export async function createDeviceLinkSession(opts?: {
+  encryptedKeys?: string;
+  encryptedKeysIv?: string;
+}) {
   return request<{
     ok: boolean;
     pairingId: string;
@@ -182,7 +185,10 @@ export async function createDeviceLinkSession() {
     linkUrl: string;
   }>('/auth/device-link/create', {
     method: 'POST',
-    body: '{}',
+    body: JSON.stringify({
+      encryptedKeys: opts?.encryptedKeys,
+      encryptedKeysIv: opts?.encryptedKeysIv,
+    }),
   });
 }
 
@@ -203,6 +209,8 @@ export async function getDeviceLinkChallenge(
     challengeId: string;
     username: string;
     requires2FA: boolean;
+    encryptedKeys: string | null;
+    encryptedKeysIv: string | null;
   }>('/auth/device-link/challenge', {
     method: 'POST',
     body: JSON.stringify({ pairingId, linkSecret, deviceFingerprint }),

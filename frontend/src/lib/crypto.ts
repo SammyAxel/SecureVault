@@ -200,6 +200,67 @@ export function base64ToUint8Array(base64: string): Uint8Array {
   return new Uint8Array(base64ToArrayBuffer(base64));
 }
 
+// ============ DEVICE-LINK KEY TRANSFER (AES-GCM, end-to-end) ============
+
+/**
+ * Encrypt a KeyBundle for device-link transfer. The `transferKey` lives only in
+ * the QR URL fragment (never sent to the server), so the server sees only ciphertext.
+ * Returns { transferKey (base64url), encryptedKeys (base64), iv (base64) }.
+ */
+export async function encryptKeyBundleForTransfer(
+  bundle: KeyBundle
+): Promise<{ transferKey: string; encryptedKeys: string; iv: string }> {
+  const rawKey = crypto.getRandomValues(new Uint8Array(32));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+
+  const aesKey = await crypto.subtle.importKey('raw', rawKey, 'AES-GCM', false, ['encrypt']);
+  const plaintext = new TextEncoder().encode(JSON.stringify(bundle));
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, plaintext);
+
+  return {
+    transferKey: uint8ToBase64Url(rawKey),
+    encryptedKeys: arrayBufferToBase64(ciphertext),
+    iv: arrayBufferToBase64(iv),
+  };
+}
+
+/**
+ * Decrypt a KeyBundle that was encrypted with `encryptKeyBundleForTransfer`.
+ */
+export async function decryptKeyBundleFromTransfer(
+  transferKeyB64Url: string,
+  encryptedKeysB64: string,
+  ivB64: string
+): Promise<KeyBundle> {
+  const rawKey = base64UrlToUint8(transferKeyB64Url);
+  const iv = base64ToUint8Array(ivB64);
+  const ciphertext = base64ToArrayBuffer(encryptedKeysB64);
+
+  const aesKey = await crypto.subtle.importKey('raw', rawKey as BufferSource, 'AES-GCM', false, ['decrypt']);
+  const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv as BufferSource }, aesKey, ciphertext);
+
+  const bundle = JSON.parse(new TextDecoder().decode(plaintext));
+  if (!bundle?.signingPrivateKey || !bundle?.encryptionPrivateKey) {
+    throw new Error('Decrypted key bundle is invalid');
+  }
+  return bundle as KeyBundle;
+}
+
+function uint8ToBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlToUint8(b64url: string): Uint8Array {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
 // ============ KEY STORAGE ============
 
 // Key bundle (stored in keys file)

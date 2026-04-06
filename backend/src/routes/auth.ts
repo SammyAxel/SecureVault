@@ -39,6 +39,9 @@ type PendingDeviceLink = {
   username: string;
   expires: number;
   completedAt?: number;
+  /** AES-GCM ciphertext of the KeyBundle, encrypted with a transferKey that only lives in the URL fragment. */
+  encryptedKeys?: string;
+  encryptedKeysIv?: string;
 };
 const pendingDeviceLinks = new Map<string, PendingDeviceLink>();
 
@@ -393,6 +396,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const user = request.user!;
     cleanupDeviceLinks();
 
+    const body = request.body as {
+      encryptedKeys?: string;
+      encryptedKeysIv?: string;
+    } | undefined;
+
     const pairingId = generateUUID();
     const linkSecret = generateToken(32);
     const expires = Date.now() + 3 * 60 * 1000;
@@ -401,6 +409,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       userId: user.id,
       username: user.username,
       expires,
+      encryptedKeys: body?.encryptedKeys,
+      encryptedKeysIv: body?.encryptedKeysIv,
     });
 
     const origin = getRequestOrigin(request).replace(/\/$/, '');
@@ -507,6 +517,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       challengeId,
       username: link.username,
       requires2FA: user.totpEnabled && !isTrustedDevice,
+      encryptedKeys: link.encryptedKeys ?? null,
+      encryptedKeysIv: link.encryptedKeysIv ?? null,
     };
   });
 
