@@ -723,6 +723,19 @@ export async function getAuditLogs(page = 1, limit = 50) {
   }>(`/admin/audit-logs?page=${page}&limit=${limit}`);
 }
 
+export async function getMyAuditLogs(page = 1, limit = 30) {
+  return request<{
+    ok: boolean;
+    logs: AuditLogEntry[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }>(`/audit-logs?page=${page}&limit=${limit}`);
+}
+
 export async function getUserSessions(userId: string) {
   return request<{ ok: boolean; sessions: UserSession[] }>(`/admin/users/${userId}/sessions`);
 }

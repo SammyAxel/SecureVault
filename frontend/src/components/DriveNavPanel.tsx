@@ -32,7 +32,12 @@ export default function DriveNavPanel(props: {
           : 'text-gray-300 hover:bg-gray-800 hover:text-white'
       }`}
     >
-      <span class="w-5 h-5 flex items-center justify-center text-gray-400 shrink-0" aria-hidden>
+      <span
+        class={`w-5 h-5 flex items-center justify-center shrink-0 ${
+          props.active === p.id ? 'text-primary-400' : 'text-gray-400'
+        }`}
+        aria-hidden
+      >
         {p.icon}
       </span>
       <span class="truncate text-left">{p.label}</span>

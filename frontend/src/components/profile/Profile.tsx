@@ -1,4 +1,4 @@
-import { createSignal, For, Show, onMount } from 'solid-js';
+import { createSignal, createEffect, For, Show, onMount, onCleanup } from 'solid-js';
 import { useAuth } from '../../stores/auth';
 import * as api from '../../lib/api';
 import { toast } from '../../stores/toast';
@@ -10,19 +10,34 @@ import {
   downloadKeyBundle,
 } from '../../lib/crypto';
 import { awaitMinElapsed, MIN_CONTENT_LOAD_MS, MIN_FORM_SUBMIT_MS } from '../../lib/motion';
+import { t, getLocale, setStoredLocale, type Locale } from '../../lib/i18n';
+import {
+  applyTheme,
+  getStoredThemeMode,
+  setStoredThemeMode,
+  type ThemeMode,
+} from '../../lib/theme';
 
 interface ProfileProps {
   onBack: () => void;
 }
 
 // Tab type
-type ProfileTab = 'general' | 'security' | 'sessions' | 'danger';
+type ProfileTab = 'general' | 'security' | 'sessions' | 'activity' | 'danger';
 
 export default function Profile(props: ProfileProps) {
   const { logout } = useAuth();
   const [activeTab, setActiveTab] = createSignal<ProfileTab>('general');
   const [tabVisible, setTabVisible] = createSignal(true);
+  // Used to force re-render on locale changes (t() is not reactive by itself)
+  const [, setLocaleTick] = createSignal(0);
   let tabTimeout: ReturnType<typeof setTimeout> | undefined;
+
+  onMount(() => {
+    const onLocale = () => setLocaleTick((v) => v + 1);
+    window.addEventListener('sv:locale-changed', onLocale as EventListener);
+    onCleanup(() => window.removeEventListener('sv:locale-changed', onLocale as EventListener));
+  });
 
   const switchTab = (tab: ProfileTab) => {
     if (tab === activeTab()) return;
@@ -47,7 +62,7 @@ export default function Profile(props: ProfileProps) {
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
         </button>
-        <h1 class="text-xl sm:text-2xl font-bold truncate">Profile Settings</h1>
+        <h1 class="text-xl sm:text-2xl font-bold truncate">{t('profile.title')}</h1>
       </div>
 
       {/* Tabs: scroll horizontally on mobile */}
@@ -79,6 +94,17 @@ export default function Profile(props: ProfileProps) {
         >
           Sessions
         </TabButton>
+        <TabButton
+          active={activeTab() === 'activity'}
+          onClick={() => switchTab('activity')}
+          icon={
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 012-2h2a2 2 0 012 2v6m-8 0h8M12 7V5m0 2a5 5 0 00-5 5v7h10v-7a5 5 0 00-5-5z" />
+            </svg>
+          }
+        >
+          {t('activity.title')}
+        </TabButton>
         <TabButton 
           active={activeTab() === 'danger'} 
           onClick={() => switchTab('danger')}
@@ -101,6 +127,9 @@ export default function Profile(props: ProfileProps) {
         </Show>
         <Show when={activeTab() === 'sessions'}>
           <SessionsTab />
+        </Show>
+        <Show when={activeTab() === 'activity'}>
+          <ActivityTab />
         </Show>
         <Show when={activeTab() === 'danger'}>
           <DangerTab onLogout={logout} />
@@ -142,6 +171,18 @@ function GeneralTab() {
   const [avatar, setAvatar] = createSignal(user()?.avatar || '');
   const [isLoading, setIsLoading] = createSignal(false);
   const [imageToCrop, setImageToCrop] = createSignal<string | null>(null);
+  const [themeMode, setThemeMode] = createSignal<ThemeMode>(getStoredThemeMode());
+  const [locale, setLocale] = createSignal<Locale>(getLocale());
+
+  onMount(() => {
+    const onLocale = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { locale?: Locale } | undefined;
+      if (detail?.locale) setLocale(detail.locale);
+      else setLocale(getLocale());
+    };
+    window.addEventListener('sv:locale-changed', onLocale as EventListener);
+    onCleanup(() => window.removeEventListener('sv:locale-changed', onLocale as EventListener));
+  });
 
   const handleAvatarChange = async (e: Event) => {
     const input = e.target as HTMLInputElement;
@@ -232,6 +273,46 @@ function GeneralTab() {
           onCancel={handleCropCancel}
         />
       </Show>
+
+      {/* Appearance */}
+      <div class="bg-gray-800 rounded-xl p-6">
+        <h3 class="text-lg font-semibold mb-4">Appearance</h3>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm text-gray-400 mb-2">{t('profile.theme')}</label>
+            <select
+              value={themeMode()}
+              onChange={(e) => {
+                const mode = e.currentTarget.value as ThemeMode;
+                setThemeMode(mode);
+                setStoredThemeMode(mode);
+                applyTheme(mode);
+              }}
+              class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500"
+            >
+              <option value="system">{t('theme.system')}</option>
+              <option value="dark">{t('theme.dark')}</option>
+              <option value="light">{t('theme.light')}</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-sm text-gray-400 mb-2">{t('profile.language')}</label>
+            <select
+              value={locale()}
+              onChange={(e) => {
+                const next = e.currentTarget.value as Locale;
+                setLocale(next);
+                setStoredLocale(next);
+              }}
+              class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500"
+            >
+              <option value="en">{t('language.en')}</option>
+              <option value="ms">{t('language.ms')}</option>
+            </select>
+          </div>
+        </div>
+      </div>
 
       {/* Avatar Section */}
       <div class="bg-gray-800 rounded-xl p-6">
@@ -779,6 +860,109 @@ function SessionsTab() {
               }}
             </For>
           </div>
+        </Show>
+      </div>
+    </div>
+  );
+}
+
+// ============ ACTIVITY TAB ============
+function ActivityTab() {
+  const [logs, setLogs] = createSignal<api.AuditLogEntry[]>([]);
+  const [isLoading, setIsLoading] = createSignal(true);
+  const [page, setPage] = createSignal(1);
+  const [totalPages, setTotalPages] = createSignal(1);
+
+  const formatAction = (action: string) => {
+    const s = action.replace(/_/g, ' ').toLowerCase();
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  };
+
+  const formatWhen = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleString();
+    } catch {
+      return iso;
+    }
+  };
+
+  const load = async () => {
+    const started = Date.now();
+    setIsLoading(true);
+    try {
+      const res = await api.getMyAuditLogs(page(), 30);
+      setLogs(res.logs || []);
+      setTotalPages(res.pagination?.totalPages || 1);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to load activity');
+      setLogs([]);
+      setTotalPages(1);
+    } finally {
+      await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
+      setIsLoading(false);
+    }
+  };
+
+  createEffect(() => {
+    void page();
+    load();
+  });
+
+  return (
+    <div class="space-y-6">
+      <div class="bg-gray-800 rounded-xl p-6">
+        <div class="flex items-center justify-between gap-3 mb-4">
+          <h3 class="text-lg font-semibold">{t('activity.title')}</h3>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={page() <= 1 || isLoading()}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              class="px-3 py-1.5 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Prev
+            </button>
+            <span class="text-xs text-gray-400">
+              Page {page()} / {totalPages()}
+            </span>
+            <button
+              type="button"
+              disabled={page() >= totalPages() || isLoading()}
+              onClick={() => setPage((p) => Math.min(totalPages(), p + 1))}
+              class="px-3 py-1.5 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+
+        <Show when={!isLoading()} fallback={<div class="text-gray-400 text-sm">Loading…</div>}>
+          <Show
+            when={logs().length > 0}
+            fallback={<div class="text-gray-400 text-sm">{t('activity.empty')}</div>}
+          >
+            <div class="space-y-3">
+              <For each={logs()}>
+                {(log) => (
+                  <div class="flex gap-3">
+                    <div class="mt-2 w-2 h-2 rounded-full bg-primary-500 shrink-0" />
+                    <div class="min-w-0 flex-1">
+                      <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span class="text-sm text-white font-medium">{formatAction(log.action)}</span>
+                        <Show when={log.resourceType}>
+                          <span class="text-xs text-gray-400">
+                            · {log.resourceType}
+                            {log.resourceId ? `:${String(log.resourceId).slice(0, 8)}…` : ''}
+                          </span>
+                        </Show>
+                      </div>
+                      <div class="text-xs text-gray-500">{formatWhen(log.createdAt)}</div>
+                    </div>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
         </Show>
       </div>
     </div>

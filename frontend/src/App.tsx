@@ -16,6 +16,8 @@ import Register from './components/Register';
 import Setup from './components/Setup';
 import ToastContainer from './components/Toast';
 import ConfirmModal from './components/ConfirmModal';
+import { initTheme } from './lib/theme';
+import { initI18n } from './lib/i18n';
 
 const Dashboard = lazy(() => import('./components/dashboard/Dashboard'));
 const Profile = lazy(() => import('./components/profile/Profile'));
@@ -224,6 +226,8 @@ function AppContent() {
 
   // Check setup status and register auth:logout listener on mount
   onMount(() => {
+    initI18n();
+    initTheme();
     const handleLogout = () => navigate(ROUTES.login);
     window.addEventListener('auth:logout', handleLogout);
 

@@ -18,6 +18,7 @@ import { shareRoutes } from './routes/share.js';
 import { adminRoutes } from './routes/admin.js';
 import notificationRoutes from './routes/notifications.js';
 import { trustedDevicesRoutes } from './routes/trustedDevices.js';
+import { auditRoutes } from './routes/audit.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -96,6 +97,7 @@ await app.register(shareRoutes);
 await app.register(adminRoutes);
 await app.register(notificationRoutes);
 await app.register(trustedDevicesRoutes);
+await app.register(auditRoutes);
 
 // Health check
 app.get('/api/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
