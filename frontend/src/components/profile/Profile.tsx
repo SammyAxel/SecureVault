@@ -17,6 +17,7 @@ import {
   setStoredThemeMode,
   type ThemeMode,
 } from '../../lib/theme';
+import { formatAbsolute, formatRelative } from '../../lib/time';
 
 interface ProfileProps {
   onBack: () => void;
@@ -786,9 +787,7 @@ function SessionsTab() {
     return { browser, os };
   };
 
-  const formatDate = (date: string) => {
-    return new Date(date).toLocaleString();
-  };
+  const formatDate = (date: string) => formatAbsolute(date);
 
   return (
     <div class="space-y-6">
@@ -839,7 +838,8 @@ function SessionsTab() {
                           </Show>
                         </div>
                         <div class="text-gray-400 text-sm">
-                          {session.ipAddress || 'Unknown IP'} • Last active: {formatDate(session.lastActive)}
+                          {session.ipAddress || 'Unknown IP'} • Last active:{' '}
+                          <span title={formatAbsolute(session.lastActive)}>{formatRelative(session.lastActive)}</span>
                         </div>
                       </div>
                     </div>
@@ -879,11 +879,7 @@ function ActivityTab() {
   };
 
   const formatWhen = (iso: string) => {
-    try {
-      return new Date(iso).toLocaleString();
-    } catch {
-      return iso;
-    }
+    return formatRelative(iso);
   };
 
   const load = async () => {
@@ -936,7 +932,17 @@ function ActivityTab() {
           </div>
         </div>
 
-        <Show when={!isLoading()} fallback={<div class="text-gray-400 text-sm">Loading…</div>}>
+        <Show
+          when={!isLoading()}
+          fallback={
+            <div class="space-y-3 animate-sv-rise">
+              <div class="h-4 w-44 bg-gray-700 rounded animate-pulse" />
+              <div class="h-3 w-64 bg-gray-700 rounded animate-pulse" />
+              <div class="h-3 w-56 bg-gray-700 rounded animate-pulse" />
+              <div class="h-3 w-60 bg-gray-700 rounded animate-pulse" />
+            </div>
+          }
+        >
           <Show
             when={logs().length > 0}
             fallback={<div class="text-gray-400 text-sm">{t('activity.empty')}</div>}
@@ -956,7 +962,9 @@ function ActivityTab() {
                           </span>
                         </Show>
                       </div>
-                      <div class="text-xs text-gray-500">{formatWhen(log.createdAt)}</div>
+                      <div class="text-xs text-gray-500" title={formatAbsolute(log.createdAt)}>
+                        {formatWhen(log.createdAt)}
+                      </div>
                     </div>
                   </div>
                 )}

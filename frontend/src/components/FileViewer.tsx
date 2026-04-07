@@ -18,6 +18,7 @@ import { logger } from '../lib/logger';
 import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../lib/motion';
 import { blobFromBlobUrlFetchResponse, prefersExplicitSaveStep, saveBlobToDevice } from '../lib/downloadBlob';
 import BlobSavePrompt from './BlobSavePrompt';
+import { formatAbsolute, formatRelative } from '../lib/time';
 
 interface FileViewerProps {
   uid: string;
@@ -200,15 +201,6 @@ export default function FileViewer(props: FileViewerProps) {
     return path.length > 0 && path[path.length - 1].uid;
   };
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
 
   // Filtered and sorted folder contents
   const displayedItems = createMemo(() => {
@@ -544,7 +536,9 @@ export default function FileViewer(props: FileViewerProps) {
                         <span class="text-gray-500">{parentPath()[parentPath().length - 1]?.name}</span>
                         <span class="text-gray-600">•</span>
                       </Show>
-                      <span>{formatSize(file()?.fileSize || 0)} • {formatDate(file()?.createdAt || '')}</span>
+                      <span title={file()?.createdAt ? formatAbsolute(file()!.createdAt) : ''}>
+                        {formatSize(file()?.fileSize || 0)} • {file()?.createdAt ? formatRelative(file()!.createdAt) : ''}
+                      </span>
                     </div>
                   </div>
                 </div>

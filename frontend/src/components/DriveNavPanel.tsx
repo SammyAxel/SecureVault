@@ -17,6 +17,13 @@ export default function DriveNavPanel(props: {
     return Math.min(100, Math.round((u.storageUsed / Math.max(1, u.storageQuota)) * 100));
   };
 
+  const storageWarning = () => {
+    const p = storagePercent();
+    if (p >= 90) return { tone: 'danger' as const, label: 'Storage almost full', detail: 'You are above 90% usage.' };
+    if (p >= 80) return { tone: 'warn' as const, label: 'Storage running low', detail: 'You are above 80% usage.' };
+    return null;
+  };
+
   const go = (id: DriveSection) => {
     props.onNavigate(id);
     props.afterNavigate?.();
@@ -114,6 +121,22 @@ export default function DriveNavPanel(props: {
               fractionDigits: (i) => (i === 0 ? 0 : 1),
             })}
           </div>
+
+          <Show when={storageWarning()}>
+            {(w) => (
+              <div
+                class={`mt-3 rounded-lg px-3 py-2 text-xs border ${
+                  w().tone === 'danger'
+                    ? 'bg-red-500/10 border-red-500/30 text-red-200'
+                    : 'bg-amber-500/10 border-amber-500/30 text-amber-100'
+                }`}
+                role="status"
+              >
+                <div class="font-semibold">{w().label}</div>
+                <div class="opacity-90">{w().detail}</div>
+              </div>
+            )}
+          </Show>
         </div>
       </Show>
     </>

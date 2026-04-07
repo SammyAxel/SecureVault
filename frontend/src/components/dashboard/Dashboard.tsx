@@ -18,6 +18,7 @@ import { TRASH_RETENTION_DAYS } from '../../lib/config';
 import { daysUntilTrashPurge } from '../../lib/trashUi';
 import { openConfirm } from '../../stores/confirm';
 import { isTypingInField } from '../../lib/keyboardShortcuts';
+import { formatAbsolute, formatRelative } from '../../lib/time';
 import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile } from '../FilePreview';
 import { SkeletonDashboard } from '../Skeleton';
 import DashboardTextPreview from './DashboardTextPreview';
@@ -61,7 +62,7 @@ interface DashboardProps {
 }
 
 export default function Dashboard(props: DashboardProps) {
-  const { updateUser } = useAuth();
+  const { updateUser, user } = useAuth();
   const [files, setFiles] = createSignal<FileItem[]>([]);
   const [currentFolder, setCurrentFolder] = createSignal<string | null>(null);
   const [currentFolderUid, setCurrentFolderUid] = createSignal<string | null>(null);
@@ -1397,6 +1398,32 @@ export default function Dashboard(props: DashboardProps) {
         </div>
       </Show>
 
+      <Show when={section() === 'drive' && !loadError()}>
+        {(() => {
+          const u = user();
+          if (!u) return null;
+          const pct = Math.min(100, Math.round((u.storageUsed / Math.max(1, u.storageQuota)) * 100));
+          if (pct < 80) return null;
+          const danger = pct >= 90;
+          return (
+            <div
+              class={`mb-4 rounded-xl px-4 py-3 text-sm border ${
+                danger
+                  ? 'bg-red-500/10 border-red-500/30 text-red-200'
+                  : 'bg-amber-500/10 border-amber-500/30 text-amber-100'
+              }`}
+              role="status"
+            >
+              <div class="font-semibold">{danger ? 'Storage almost full' : 'Storage running low'}</div>
+              <div class="opacity-90">
+                You are using <span class="font-medium">{pct}%</span> of your quota. Consider deleting or moving large files to
+                Trash.
+              </div>
+            </div>
+          );
+        })()}
+      </Show>
+
       {/* Upload progress */}
       <Show when={uploadProgress()}>
         <div class="mb-6 bg-primary-500/20 border border-primary-500 rounded-lg p-4 flex items-center gap-3">
@@ -1630,7 +1657,9 @@ export default function Dashboard(props: DashboardProps) {
                         {formatSize(file.fileSize, { zero: 'dash' })}
                       </td>
                       <td class="px-4 py-3 text-gray-400 text-sm min-w-0">
-                        <div class="whitespace-nowrap">{new Date(file.createdAt).toLocaleDateString()}</div>
+                        <div class="whitespace-nowrap" title={formatAbsolute(file.createdAt)}>
+                          {formatRelative(file.createdAt)}
+                        </div>
                         <Show when={section() === 'trash' && file.deletedAt}>
                           <div class="text-xs text-gray-500 mt-0.5">
                             Deletes in {daysUntilTrashPurge(file.deletedAt!)}d
