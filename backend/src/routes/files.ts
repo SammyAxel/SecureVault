@@ -67,17 +67,45 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   // ============ LIST FILES ============
   app.get('/api/files', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
-    const { parentId } = request.query as { parentId?: string };
-    
+    const { parentId, q } = request.query as { parentId?: string; q?: string };
+    const qTrim = typeof q === 'string' ? q.trim().slice(0, 200) : '';
+
+    // Name search: entire My Drive tree (any depth), not only the current folder listing
+    if (qTrim.length > 0) {
+      const files = await db.query.files.findMany({
+        where: and(
+          eq(schema.files.ownerId, user.id),
+          eq(schema.files.isDeleted, false),
+          sql`instr(lower(${schema.files.filename}), lower(${qTrim})) > 0`,
+        ),
+        orderBy: (files: any, { desc }: any) => [desc(files.isFolder), desc(files.createdAt)],
+      });
+
+      return {
+        ok: true,
+        files: files.map((f: any) => ({
+          id: f.id,
+          uid: f.uid,
+          filename: f.filename,
+          fileSize: f.fileSize,
+          isFolder: f.isFolder,
+          parentId: f.parentId,
+          createdAt: f.createdAt,
+          encryptedKey: f.encryptedKey,
+          iv: f.iv,
+        })),
+      };
+    }
+
     const files = await db.query.files.findMany({
       where: and(
         eq(schema.files.ownerId, user.id),
         eq(schema.files.isDeleted, false),
-        parentId ? eq(schema.files.parentId, parentId) : isNull(schema.files.parentId)
+        parentId ? eq(schema.files.parentId, parentId) : isNull(schema.files.parentId),
       ),
       orderBy: (files: any, { desc }: any) => [desc(files.isFolder), desc(files.createdAt)],
     });
-    
+
     return {
       ok: true,
       files: files.map((f: any) => ({

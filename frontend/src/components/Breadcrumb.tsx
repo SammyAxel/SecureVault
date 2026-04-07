@@ -19,10 +19,11 @@ export default function Breadcrumb(props: BreadcrumbProps) {
           <>
             <Show when={index() > 0}>
               <svg
-                class="w-4 h-4 text-gray-600 flex-shrink-0"
+                class="w-4 h-4 text-gray-500 flex-shrink-0"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
+                aria-hidden
               >
                 <path
                   stroke-linecap="round"
@@ -42,7 +43,9 @@ export default function Breadcrumb(props: BreadcrumbProps) {
               }
             >
               <button
+                type="button"
                 onClick={() => props.onNavigate(index())}
+                title="Jump to this folder"
                 class="text-gray-400 hover:text-primary-400 hover:bg-gray-800 px-2 py-1 rounded transition-colors flex items-center gap-1"
               >
                 <Show when={index() === 0}>

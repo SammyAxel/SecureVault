@@ -16,8 +16,10 @@ import Register from './components/Register';
 import Setup from './components/Setup';
 import ToastContainer from './components/Toast';
 import ConfirmModal from './components/ConfirmModal';
+import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
 import { initTheme } from './lib/theme';
 import { initI18n } from './lib/i18n';
+import { isTypingInField } from './lib/keyboardShortcuts';
 
 const Dashboard = lazy(() => import('./components/dashboard/Dashboard'));
 const Profile = lazy(() => import('./components/profile/Profile'));
@@ -57,6 +59,7 @@ function LazyRouteFallback() {
 function AppContent() {
   const { user, isLoading, logout } = useAuth();
   let mobileSearchField: HTMLInputElement | undefined;
+  let desktopSearchField: HTMLInputElement | undefined;
   const [showRegister, setShowRegister] = createSignal(false);
   const [needsSetup, setNeedsSetup] = createSignal(false);
   const [checkingSetup, setCheckingSetup] = createSignal(true);
@@ -70,8 +73,18 @@ function AppContent() {
   const [routeEntering, setRouteEntering] = createSignal(false);
   const [mobileNavOpen, setMobileNavOpen] = createSignal(false);
   const [mobileSearchOpen, setMobileSearchOpen] = createSignal(false);
+  const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
 
   const driveShellOpen = () => !!user() && !isAdminPage() && !isProfilePage();
+
+  const focusVaultSearch = () => {
+    if (typeof window === 'undefined') return;
+    if (window.matchMedia('(min-width: 768px)').matches) {
+      queueMicrotask(() => desktopSearchField?.focus());
+    } else {
+      setMobileSearchOpen(true);
+    }
+  };
 
   createEffect(() => {
     if (!mobileSearchOpen()) return;
@@ -245,7 +258,41 @@ function AppContent() {
       }
     })();
 
-    return () => window.removeEventListener('auth:logout', handleLogout);
+    const onGlobalShortcut = (e: KeyboardEvent) => {
+      if (checkingSetup() || needsSetup() || !user()) return;
+
+      if (shortcutsOpen()) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setShortcutsOpen(false);
+        }
+        return;
+      }
+
+      if (!driveShellOpen()) return;
+      if (isTypingInField(e.target)) return;
+
+      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        e.preventDefault();
+        setShortcutsOpen(true);
+        return;
+      }
+      if (e.key === '/' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        focusVaultSearch();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        focusVaultSearch();
+      }
+    };
+    document.addEventListener('keydown', onGlobalShortcut);
+
+    return () => {
+      window.removeEventListener('auth:logout', handleLogout);
+      document.removeEventListener('keydown', onGlobalShortcut);
+    };
   });
 
   return (
@@ -327,6 +374,9 @@ function AppContent() {
                           placeholder="Search in SecureVault…"
                           value={searchDraft()}
                           onInput={(e) => setSearchDraft(e.currentTarget.value)}
+                          ref={(el) => {
+                            desktopSearchField = el;
+                          }}
                           class="w-full pl-10 pr-10 py-2 bg-gray-700/60 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                           autocomplete="off"
                         />
@@ -358,6 +408,22 @@ function AppContent() {
 
                 <div class="flex items-center gap-2 sm:gap-4 shrink-0">
                   <Show when={!isAdminPage() && !isProfilePage()}>
+                    <button
+                      type="button"
+                      class="p-2 rounded-lg text-gray-300 hover:bg-gray-700 hover:text-white touch-target"
+                      onClick={() => setShortcutsOpen(true)}
+                      title="Keyboard shortcuts (?)"
+                      aria-label="Keyboard shortcuts"
+                    >
+                      <svg class="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.546-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      </svg>
+                    </button>
                     <button
                       type="button"
                       class="md:hidden p-2 rounded-lg text-gray-300 hover:bg-gray-700 hover:text-white touch-target"
@@ -591,6 +657,8 @@ function AppContent() {
               </div>
             </Show>
           </main>
+
+          <KeyboardShortcutsModal open={shortcutsOpen()} onClose={() => setShortcutsOpen(false)} />
         </div>
       </Show>
     </>

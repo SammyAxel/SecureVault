@@ -371,9 +371,14 @@ export interface FileItem {
   iv: string;
 }
 
-export async function listFiles(parentId?: string) {
-  const query = parentId ? `?parentId=${parentId}` : '';
-  return request<{ ok: boolean; files: FileItem[] }>(`/files${query}`);
+/** List folder contents, or when `nameSearch` is set, all owned files matching the name (any folder depth). */
+export async function listFiles(parentId?: string | null, nameSearch?: string) {
+  const params = new URLSearchParams();
+  if (parentId) params.set('parentId', parentId);
+  const q = nameSearch?.trim();
+  if (q) params.set('q', q);
+  const qs = params.toString();
+  return request<{ ok: boolean; files: FileItem[] }>(qs ? `/files?${qs}` : '/files');
 }
 
 export async function getFileByUid(uid: string) {

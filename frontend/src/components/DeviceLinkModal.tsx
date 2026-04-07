@@ -19,8 +19,13 @@ export default function DeviceLinkModal(props: DeviceLinkModalProps) {
   const [loading, setLoading] = createSignal(false);
   const [expired, setExpired] = createSignal(false);
   const [done, setDone] = createSignal(false);
+  const [linkCopied, setLinkCopied] = createSignal(false);
 
   let pollTimer: ReturnType<typeof setInterval> | undefined;
+
+  createEffect(() => {
+    if (!props.open) setLinkCopied(false);
+  });
 
   const stopPoll = () => {
     if (pollTimer) {
@@ -105,6 +110,8 @@ export default function DeviceLinkModal(props: DeviceLinkModalProps) {
     if (!url) return;
     try {
       await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 2000);
       toast.success('Link copied');
     } catch {
       toast.error('Could not copy');
@@ -158,9 +165,13 @@ export default function DeviceLinkModal(props: DeviceLinkModalProps) {
               <button
                 type="button"
                 onClick={() => copyLink()}
-                class="text-sm text-primary-400 hover:text-primary-300"
+                class={`text-sm font-medium rounded-lg px-3 py-2 transition-colors ${
+                  linkCopied()
+                    ? 'bg-green-600/20 text-green-400'
+                    : 'text-primary-400 hover:text-primary-300 hover:bg-gray-700/50'
+                }`}
               >
-                Copy link (if you cannot scan)
+                {linkCopied() ? 'Copied!' : 'Copy link (if you cannot scan)'}
               </button>
             </div>
           </Show>
