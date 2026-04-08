@@ -8,7 +8,7 @@ FROM node:24-alpine AS backend-builder
 
 WORKDIR /app/backend
 COPY backend/package*.json ./
-RUN npm ci && npm cache clean --force
+RUN npm install --ignore-scripts=false && npm cache clean --force
 COPY backend/ ./
 RUN npm run build
 
@@ -17,7 +17,7 @@ FROM node:24-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-RUN npm ci && npm cache clean --force
+RUN npm install --ignore-scripts=false && npm cache clean --force
 COPY frontend/ ./
 RUN npm run build
 
@@ -35,7 +35,7 @@ COPY --from=backend-builder --chown=securevault:nodejs /app/backend/dist ./dist
 COPY --from=backend-builder --chown=securevault:nodejs /app/backend/package*.json ./
 
 # Install only production dependencies
-RUN npm ci --only=production && npm cache clean --force
+RUN npm install --omit=dev && npm cache clean --force
 
 # Copy frontend build
 COPY --from=frontend-builder --chown=securevault:nodejs /app/frontend/dist ./frontend/dist
