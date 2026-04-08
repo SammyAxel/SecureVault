@@ -1,4 +1,4 @@
-import { createSignal, createEffect, createMemo, For, Show, onCleanup } from 'solid-js';
+import { createSignal, createEffect, createMemo, For, Show, onCleanup, onMount, untrack } from 'solid-js';
 import { useAuth } from '../../stores/auth.jsx';
 import * as api from '../../lib/api';
 import { ApiError } from '../../lib/api';
@@ -17,6 +17,8 @@ import BlobSavePrompt from '../BlobSavePrompt';
 import { TRASH_RETENTION_DAYS } from '../../lib/config';
 import { daysUntilTrashPurge } from '../../lib/trashUi';
 import { openConfirm } from '../../stores/confirm';
+import { isTypingInField } from '../../lib/keyboardShortcuts';
+import { formatAbsolute, formatRelative } from '../../lib/time';
 import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile } from '../FilePreview';
 import { SkeletonDashboard } from '../Skeleton';
 import DashboardTextPreview from './DashboardTextPreview';
@@ -30,6 +32,10 @@ import {
   unwrapKey,
   base64ToUint8Array,
   arrayBufferToBase64,
+  generateFileKey,
+  encryptFilename,
+  decryptFilename,
+  isEncryptedFilename,
 } from '../../lib/crypto';
 
 // Helper to get MIME type from filename
@@ -60,7 +66,7 @@ interface DashboardProps {
 }
 
 export default function Dashboard(props: DashboardProps) {
-  const { updateUser } = useAuth();
+  const { updateUser, user } = useAuth();
   const [files, setFiles] = createSignal<FileItem[]>([]);
   const [currentFolder, setCurrentFolder] = createSignal<string | null>(null);
   const [currentFolderUid, setCurrentFolderUid] = createSignal<string | null>(null);
@@ -107,7 +113,19 @@ export default function Dashboard(props: DashboardProps) {
   // Action menu dropdown state
   const [openMenuId, setOpenMenuId] = createSignal<string | null>(null);
   const [menuPosition, setMenuPosition] = createSignal<{ top: number; left: number } | null>(null);
+  /** Keyboard highlight index in `filteredFiles()`; list region must be focused (Tab). */
+  const [listNavIndex, setListNavIndex] = createSignal<number | null>(null);
   const section = () => props.section || 'drive';
+
+  const listNavBlocked = () =>
+    !!(
+      previewFile() ||
+      shareFile() ||
+      renameFile() ||
+      moveFile() ||
+      showCreateFolder() ||
+      openMenuId()
+    );
 
   // Trash folder navigation state
   const [trashCurrentFolder, setTrashCurrentFolder] = createSignal<string | null>(null);
@@ -186,6 +204,55 @@ export default function Dashboard(props: DashboardProps) {
     return result;
   });
 
+  createEffect(() => {
+    section();
+    currentFolder();
+    trashCurrentFolder();
+    untrack(() => setListNavIndex(null));
+  });
+
+  createEffect(() => {
+    const files = filteredFiles();
+    const idx = listNavIndex();
+    if (idx === null) return;
+    untrack(() => {
+      if (files.length === 0) setListNavIndex(null);
+      else if (idx >= files.length) setListNavIndex(files.length - 1);
+    });
+  });
+
+  /**
+   * Decrypt encrypted filenames in-place for a list of file items.
+   * Files whose filenames are not encrypted are left untouched (backward compat).
+   */
+  const decryptFileNames = async (items: FileItem[]): Promise<FileItem[]> => {
+    const keys = getCurrentKeys();
+    if (!keys) return items;
+
+    const hasEncrypted = items.some((f) => isEncryptedFilename(f.filename));
+    if (!hasEncrypted) return items;
+
+    let privateKey: CryptoKey;
+    try {
+      privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
+    } catch {
+      return items;
+    }
+
+    return Promise.all(
+      items.map(async (f) => {
+        if (!isEncryptedFilename(f.filename) || !f.encryptedKey) return f;
+        try {
+          const fileKey = await unwrapKey(f.encryptedKey, privateKey);
+          const name = await decryptFilename(f.filename, fileKey);
+          return { ...f, filename: name };
+        } catch {
+          return f;
+        }
+      })
+    );
+  };
+
   // Load files for the active section
   const loadFiles = async () => {
     const started = Date.now();
@@ -193,45 +260,52 @@ export default function Dashboard(props: DashboardProps) {
     setIsLoading(true);
     try {
       if (section() === 'drive') {
-        const result = await api.listFiles(currentFolder() || undefined);
-        setFiles(result.files);
+        const sq = searchQuery().trim();
+        let result: { ok: boolean; files: FileItem[] };
+        if (sq) {
+          // Client-side search: fetch all files, decrypt names, then filter
+          result = await api.listFiles(undefined, undefined, true);
+          const decrypted = await decryptFileNames(result.files);
+          const lower = sq.toLowerCase();
+          setFiles(decrypted.filter((f) => f.filename.toLowerCase().includes(lower)));
+        } else {
+          result = await api.listFiles(currentFolder() || undefined);
+          setFiles(await decryptFileNames(result.files));
+        }
         return;
       }
       if (section() === 'shared') {
         const result = await api.getSharedWithMe();
-        // Map to FileItem shape (owner shown via filename suffix for now in UI layer below)
-        setFiles(
-          result.files.map((f: any) => ({
-            id: f.id,
-            uid: undefined,
-            filename: f.filename,
-            fileSize: f.fileSize,
-            isFolder: f.isFolder,
-            parentId: null,
-            createdAt: f.sharedAt,
-            encryptedKey: f.encryptedKey,
-            iv: f.iv,
-            owner: f.owner,
-          }))
-        );
+        const mapped: FileItem[] = result.files.map((f: any) => ({
+          id: f.id,
+          uid: undefined,
+          filename: f.filename,
+          fileSize: f.fileSize,
+          isFolder: f.isFolder,
+          parentId: null,
+          createdAt: f.sharedAt,
+          encryptedKey: f.encryptedKey,
+          iv: f.iv,
+          owner: f.owner,
+        }));
+        setFiles(await decryptFileNames(mapped));
         return;
       }
       if (section() === 'trash') {
         const result = await api.getTrash();
-        setFiles(
-          result.files.map((f: any) => ({
-            id: f.id,
-            uid: undefined,
-            filename: f.filename,
-            fileSize: f.fileSize,
-            isFolder: f.isFolder,
-            parentId: f.parentId,
-            createdAt: f.deletedAt,
-            deletedAt: f.deletedAt,
-            encryptedKey: '',
-            iv: '',
-          }))
-        );
+        const mapped: FileItem[] = result.files.map((f: any) => ({
+          id: f.id,
+          uid: undefined,
+          filename: f.filename,
+          fileSize: f.fileSize,
+          isFolder: f.isFolder,
+          parentId: f.parentId,
+          createdAt: f.deletedAt,
+          deletedAt: f.deletedAt,
+          encryptedKey: f.encryptedKey || '',
+          iv: f.iv || '',
+        }));
+        setFiles(await decryptFileNames(mapped));
         return;
       }
     } catch (error) {
@@ -260,9 +334,10 @@ export default function Dashboard(props: DashboardProps) {
   };
 
   createEffect(() => {
-    // Re-load when folder, section, retry, or UID changes (UID effect below can also trigger load)
+    // Re-load when folder, section, vault search text, retry, or UID changes (UID effect below can also trigger load)
     section();
     currentFolder();
+    searchQuery();
     loadRetryNonce();
     loadFiles();
   });
@@ -284,20 +359,45 @@ export default function Dashboard(props: DashboardProps) {
         if (cancelled) return;
         if (!result?.file) return;
 
+        // Decrypt encrypted folder/file names in path + current item
+        const keys = getCurrentKeys();
+        let decryptedParents = (result.parentPath || []).map((p: any) => ({ id: p.id, uid: p.uid, name: p.name, encryptedKey: p.encryptedKey }));
+        let currentName = result.file.filename;
+
+        if (keys) {
+          try {
+            const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
+            decryptedParents = await Promise.all(
+              decryptedParents.map(async (p: any) => {
+                if (!isEncryptedFilename(p.name) || !p.encryptedKey) return p;
+                try {
+                  const fk = await unwrapKey(p.encryptedKey, privateKey);
+                  return { ...p, name: await decryptFilename(p.name, fk) };
+                } catch { return p; }
+              })
+            );
+            if (isEncryptedFilename(currentName) && result.file.encryptedKey) {
+              try {
+                const fk = await unwrapKey(result.file.encryptedKey, privateKey);
+                currentName = await decryptFilename(currentName, fk);
+              } catch { /* keep raw */ }
+            }
+          } catch { /* ignore */ }
+        }
+
         const root = { id: null, uid: null, name: 'My Files' as const };
-        const parents = (result.parentPath || []).map((p) => ({ id: p.id, uid: p.uid, name: p.name }));
-        const current = { id: result.file.id, uid: result.file.uid || null, name: result.file.filename };
+        const parents = decryptedParents.map((p: any) => ({ id: p.id, uid: p.uid, name: p.name }));
+        const current = { id: result.file.id, uid: result.file.uid || null, name: currentName };
 
         if (result.file.isFolder) {
           setFolderPath([root, ...parents, current]);
           setCurrentFolderUid(result.file.uid || null);
           setCurrentFolder(result.file.id);
         } else {
-          // If UID points to a file, keep folder context but open preview (if possible)
           setFolderPath([root, ...parents]);
           setCurrentFolderUid(parents.length ? parents[parents.length - 1].uid : null);
           setCurrentFolder(parents.length ? parents[parents.length - 1].id : null);
-          await handleOpen(result.file);
+          await handleOpen({ ...result.file, filename: currentName });
         }
       } catch (e) {
         if (cancelled) return;
@@ -379,6 +479,12 @@ export default function Dashboard(props: DashboardProps) {
     }
   };
 
+  const goToParentFolder = () => {
+    const pathLen = folderPath().length;
+    if (pathLen <= 1) return;
+    navigateUp(pathLen - 2);
+  };
+
   // Trash folder navigation
   const navigateIntoTrashFolder = (file: FileItem) => {
     setTrashCurrentFolder(file.id);
@@ -391,6 +497,36 @@ export default function Dashboard(props: DashboardProps) {
     const lastItem = newPath[newPath.length - 1];
     setTrashCurrentFolder(lastItem.id);
   };
+
+  const goToParentTrashFolder = () => {
+    const pathLen = trashFolderPath().length;
+    if (pathLen <= 1) return;
+    navigateTrashUp(pathLen - 2);
+  };
+
+  // Alt+↑ / ⌘+↑ — parent folder (My Drive + Trash), like Explorer / Finder
+  onMount(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isTypingInField(e.target)) return;
+      if (listNavBlocked()) return;
+      const sec = section();
+      if (sec !== 'drive' && sec !== 'trash') return;
+      const parentKey =
+        (e.altKey && !e.metaKey && !e.ctrlKey && e.key === 'ArrowUp') ||
+        (e.metaKey && !e.altKey && !e.ctrlKey && e.key === 'ArrowUp');
+      if (!parentKey) return;
+      e.preventDefault();
+      if (sec === 'drive') {
+        if (folderPath().length <= 1) return;
+        goToParentFolder();
+      } else {
+        if (trashFolderPath().length <= 1) return;
+        goToParentTrashFolder();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  });
 
   // Reset trash navigation when leaving trash section
   createEffect(() => {
@@ -428,6 +564,9 @@ export default function Dashboard(props: DashboardProps) {
         // Encrypt file
         const { encrypted, key, iv } = await encryptFile(arrayBuffer);
 
+        // Encrypt filename with the same per-file AES key (zero-knowledge)
+        const encName = await encryptFilename(file.name, key);
+
         // Wrap key with user's public key
         const publicKey = await importEncryptionPublicKey(keys.encryptionPublicKey);
         const wrappedKey = await wrapKey(key, publicKey);
@@ -441,7 +580,8 @@ export default function Dashboard(props: DashboardProps) {
           wrappedKey,
           arrayBufferToBase64(iv),
           fileHash,
-          parentId || undefined
+          parentId || undefined,
+          encName
         );
 
         setUploadProgress(null);
@@ -547,6 +687,78 @@ export default function Dashboard(props: DashboardProps) {
       setUploadProgress(null);
     }
   }
+
+  const scrollListRowIntoView = (idx: number) => {
+    queueMicrotask(() => {
+      document.getElementById(`sv-list-row-${idx}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  };
+
+  function activateFileRow(file: FileItem) {
+    if (file.isFolder) {
+      if (section() === 'trash') {
+        navigateIntoTrashFolder(file);
+        return;
+      }
+      if (section() !== 'drive') {
+        toast.info(
+          'Open shared folders from My Drive if you own them, or use the top search to find a file by name.'
+        );
+        return;
+      }
+      navigateToFolder(file.id, file.filename, file.uid);
+      return;
+    }
+    if (section() !== 'trash' && isPreviewable(file.filename)) {
+      void handleOpen(file);
+    }
+  }
+
+  const handleListRegionKeyDown = (e: KeyboardEvent) => {
+    if (listNavBlocked()) return;
+    const files = filteredFiles();
+    if (files.length === 0) return;
+
+    let idx = listNavIndex();
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (idx === null) idx = 0;
+      else idx = Math.min(files.length - 1, idx + 1);
+      setListNavIndex(idx);
+      scrollListRowIntoView(idx);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (idx === null) idx = files.length - 1;
+      else idx = Math.max(0, idx - 1);
+      setListNavIndex(idx);
+      scrollListRowIntoView(idx);
+      return;
+    }
+    if (e.key === 'Home' && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      setListNavIndex(0);
+      scrollListRowIntoView(0);
+      return;
+    }
+    if (e.key === 'End' && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      setListNavIndex(files.length - 1);
+      scrollListRowIntoView(files.length - 1);
+      return;
+    }
+    if (e.key === 'Enter' && idx !== null) {
+      e.preventDefault();
+      const file = files[idx];
+      if (file) activateFileRow(file);
+      return;
+    }
+    if (e.key === 'Escape' && idx !== null) {
+      e.preventDefault();
+      setListNavIndex(null);
+    }
+  };
 
   // Close preview
   const closePreview = () => {
@@ -688,8 +900,19 @@ export default function Dashboard(props: DashboardProps) {
     const file = renameFile();
     if (!file || !renameName().trim()) return;
 
+    const keys = getCurrentKeys();
+    if (!keys) {
+      toast.error('Please login again - keys not found');
+      return;
+    }
+
     try {
-      await api.renameFile(file.id, renameName().trim());
+      // Re-encrypt the new name with the file's AES key
+      const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
+      const fileKey = await unwrapKey(file.encryptedKey, privateKey);
+      const encName = await encryptFilename(renameName().trim(), fileKey);
+
+      await api.renameFile(file.id, encName);
       setRenameFile(null);
       setRenameName('');
       toast.success('File renamed successfully');
@@ -703,9 +926,30 @@ export default function Dashboard(props: DashboardProps) {
   const openMoveModal = async (file: FileItem) => {
     try {
       const result = await api.getAllFolders();
-      // Filter out the file itself if it's a folder (can't move into itself or descendants)
       const filteredFolders = result.folders.filter(f => f.id !== file.id);
-      setAllFolders(filteredFolders);
+
+      // Decrypt encrypted folder names for the move dialog
+      const keys = getCurrentKeys();
+      let decryptedFolders = filteredFolders;
+      if (keys) {
+        try {
+          const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
+          decryptedFolders = await Promise.all(
+            filteredFolders.map(async (f) => {
+              if (!isEncryptedFilename(f.filename) || !f.encryptedKey) return f;
+              try {
+                const fk = await unwrapKey(f.encryptedKey, privateKey);
+                const name = await decryptFilename(f.filename, fk);
+                return { ...f, filename: name };
+              } catch {
+                return f;
+              }
+            })
+          );
+        } catch { /* show raw on failure */ }
+      }
+
+      setAllFolders(decryptedFolders);
       setMoveFile(file);
       setSelectedMoveTarget(file.parentId);
     } catch (error: any) {
@@ -738,8 +982,26 @@ export default function Dashboard(props: DashboardProps) {
     const name = newFolderName().trim();
     if (!name) return;
 
+    const keys = getCurrentKeys();
+    if (!keys) {
+      toast.error('Please login again - keys not found');
+      return;
+    }
+
     try {
-      await api.createFolder(name, currentFolder() || undefined);
+      // Generate an AES key for the folder (used to encrypt folder name)
+      const folderKey = await generateFileKey();
+      const encName = await encryptFilename(name, folderKey);
+      const publicKey = await importEncryptionPublicKey(keys.encryptionPublicKey);
+      const wrappedKey = await wrapKey(folderKey, publicKey);
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+
+      await api.createFolder(
+        encName,
+        currentFolder() || undefined,
+        wrappedKey,
+        arrayBufferToBase64(iv),
+      );
       toast.success('Folder created successfully');
       setShowCreateFolder(false);
       setNewFolderName('');
@@ -987,25 +1249,87 @@ export default function Dashboard(props: DashboardProps) {
     <div class="pb-20">
       {/* Top bar: stacks on mobile */}
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
-        <div class="min-w-0 flex-1">
+        <div class="min-w-0 flex-1 flex flex-col gap-1">
           <Show
             when={section() === 'drive'}
             fallback={
               <Show
                 when={section() === 'trash'}
                 fallback={
-                  <div class="flex items-center gap-2">
-                    <h2 class="text-lg sm:text-xl font-semibold text-white">Shared with me</h2>
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <h2 class="text-lg sm:text-xl font-semibold text-white">Shared with me</h2>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-1 max-w-xl">
+                      Tip: use the search bar to find a file by name. Folder trees you own are easiest to browse in{' '}
+                      <button
+                        type="button"
+                        class="text-primary-400 hover:text-primary-300 underline"
+                        onClick={() => props.navigate?.(hrefWithCurrentSearch(ROUTES.drive))}
+                      >
+                        My Drive
+                      </button>
+                      — click any folder in the path bar to jump out of deep nesting.
+                    </p>
                   </div>
                 }
               >
-                {/* Trash breadcrumb navigation */}
-                <Breadcrumb items={trashFolderPath()} onNavigate={navigateTrashUp} />
+                <div class="flex items-start gap-2 min-w-0">
+                  <Show when={trashFolderPath().length > 1}>
+                    <button
+                      type="button"
+                      onClick={goToParentTrashFolder}
+                      class="shrink-0 flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-gray-600 bg-gray-800/90 hover:bg-gray-700 text-gray-200 text-sm touch-target"
+                      title="Up one level (Alt+↑ or ⌘+↑)"
+                      aria-label="Up one folder"
+                    >
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M5 10l7-7m0 0l7 7m-7-7v18"
+                        />
+                      </svg>
+                      <span class="hidden sm:inline">Up</span>
+                    </button>
+                  </Show>
+                  <div class="min-w-0 flex-1">
+                    <Breadcrumb items={trashFolderPath()} onNavigate={navigateTrashUp} />
+                  </div>
+                </div>
               </Show>
             }
           >
-            {/* Breadcrumb: scrolls horizontally on mobile */}
-            <Breadcrumb items={folderPath()} onNavigate={navigateUp} />
+            <div class="flex items-start gap-2 min-w-0">
+              <Show when={folderPath().length > 1}>
+                <button
+                  type="button"
+                  onClick={goToParentFolder}
+                  class="shrink-0 flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-gray-600 bg-gray-800/90 hover:bg-gray-700 text-gray-200 text-sm touch-target"
+                  title="Up one level (Alt+↑ or ⌘+↑)"
+                  aria-label="Up one folder"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M5 10l7-7m0 0l7 7m-7-7v18"
+                    />
+                  </svg>
+                  <span class="hidden sm:inline">Up</span>
+                </button>
+              </Show>
+              <div class="min-w-0 flex-1 pt-0.5">
+                <Breadcrumb items={folderPath()} onNavigate={navigateUp} />
+                <Show when={folderPath().length > 2}>
+                  <p class="text-xs text-gray-500 mt-1 hidden sm:block">
+                    Click an earlier folder in the path to jump back without opening each one.
+                  </p>
+                </Show>
+              </div>
+            </div>
           </Show>
         </div>
 
@@ -1113,6 +1437,12 @@ export default function Dashboard(props: DashboardProps) {
           </Show>
       </div>
 
+      <Show when={section() === 'drive' && searchQuery().trim()}>
+        <p class="text-xs text-gray-500 mb-3">
+          Searching names across your whole My Drive, including inside nested folders.
+        </p>
+      </Show>
+
       <Show when={loadError() && !isLoading()}>
         <div class="mb-4 bg-red-900/20 border border-red-800/60 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <p class="text-sm text-red-200">{loadError()}</p>
@@ -1184,6 +1514,32 @@ export default function Dashboard(props: DashboardProps) {
             </button>
           </div>
         </div>
+      </Show>
+
+      <Show when={section() === 'drive' && !loadError()}>
+        {(() => {
+          const u = user();
+          if (!u) return null;
+          const pct = Math.min(100, Math.round((u.storageUsed / Math.max(1, u.storageQuota)) * 100));
+          if (pct < 80) return null;
+          const danger = pct >= 90;
+          return (
+            <div
+              class={`mb-4 rounded-xl px-4 py-3 text-sm border ${
+                danger
+                  ? 'bg-red-500/10 border-red-500/30 text-red-200'
+                  : 'bg-amber-500/10 border-amber-500/30 text-amber-100'
+              }`}
+              role="status"
+            >
+              <div class="font-semibold">{danger ? 'Storage almost full' : 'Storage running low'}</div>
+              <div class="opacity-90">
+                You are using <span class="font-medium">{pct}%</span> of your quota. Consider deleting or moving large files to
+                Trash.
+              </div>
+            </div>
+          );
+        })()}
       </Show>
 
       {/* Upload progress */}
@@ -1293,7 +1649,23 @@ export default function Dashboard(props: DashboardProps) {
         </Show>
 
         <Show when={!isLoading() && !loadError() && filteredFiles().length > 0}>
-          <div class="rounded-lg border border-gray-700 overflow-hidden bg-gray-900/20">
+          <div
+            class="rounded-lg border border-gray-700 bg-gray-900/20 outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500/90"
+            tabIndex={0}
+            role="region"
+            aria-label="Files and folders. Use arrow keys to move, Enter to open."
+            onKeyDown={handleListRegionKeyDown}
+            onFocus={() => {
+              if (listNavBlocked()) return;
+              const n = filteredFiles().length;
+              if (n > 0 && listNavIndex() === null) setListNavIndex(0);
+            }}
+            onBlur={(e) => {
+              const next = e.relatedTarget as Node | null;
+              if (next && e.currentTarget.contains(next)) return;
+              setListNavIndex(null);
+            }}
+          >
             <div class="overflow-x-auto -mx-px">
               <table class="w-full min-w-[520px] table-fixed">
                 <thead class="bg-gray-800">
@@ -1317,11 +1689,12 @@ export default function Dashboard(props: DashboardProps) {
               </thead>
               <tbody class="divide-y divide-gray-700">
                 <For each={filteredFiles()}>
-                  {(file) => (
+                  {(file, index) => (
                     <tr 
+                      id={`sv-list-row-${index()}`}
                       class={`file-item ${selectedFiles().has(file.id) ? 'bg-primary-500/10' : ''} ${
                         file.isFolder && dropTargetFolder() === file.id ? 'bg-blue-500/20 ring-2 ring-blue-500' : ''
-                      }`}
+                      } ${listNavIndex() === index() ? 'bg-primary-500/15 ring-1 ring-inset ring-primary-500/45' : ''}`}
                       draggable={true}
                       onDragStart={(e) => handleFileDragStart(e, file)}
                       onDragEnd={handleFileDragEnd}
@@ -1355,15 +1728,8 @@ export default function Dashboard(props: DashboardProps) {
                             <button
                               type="button"
                               onClick={() => {
-                                if (section() === 'trash') {
-                                  navigateIntoTrashFolder(file);
-                                  return;
-                                }
-                                if (section() !== 'drive') {
-                                  toast.info('Folder navigation is only available in My Drive.');
-                                  return;
-                                }
-                                navigateToFolder(file.id, file.filename, file.uid);
+                                setListNavIndex(index());
+                                activateFileRow(file);
                               }}
                               class="text-white hover:text-primary-400 text-left"
                             >
@@ -1383,9 +1749,10 @@ export default function Dashboard(props: DashboardProps) {
                                   : `text-white ${isPreviewable(file.filename) ? 'hover:text-primary-400' : ''}`
                               }`}
                               disabled={section() === 'trash'}
-                              onClick={() =>
-                                section() !== 'trash' && isPreviewable(file.filename) && handleOpen(file)
-                              }
+                              onClick={() => {
+                                setListNavIndex(index());
+                                if (section() !== 'trash' && isPreviewable(file.filename)) void handleOpen(file);
+                              }}
                               title={
                                 section() === 'trash'
                                   ? 'Preview is not available in Trash'
@@ -1408,7 +1775,9 @@ export default function Dashboard(props: DashboardProps) {
                         {formatSize(file.fileSize, { zero: 'dash' })}
                       </td>
                       <td class="px-4 py-3 text-gray-400 text-sm min-w-0">
-                        <div class="whitespace-nowrap">{new Date(file.createdAt).toLocaleDateString()}</div>
+                        <div class="whitespace-nowrap" title={formatAbsolute(file.createdAt)}>
+                          {formatRelative(file.createdAt)}
+                        </div>
                         <Show when={section() === 'trash' && file.deletedAt}>
                           <div class="text-xs text-gray-500 mt-0.5">
                             Deletes in {daysUntilTrashPurge(file.deletedAt!)}d

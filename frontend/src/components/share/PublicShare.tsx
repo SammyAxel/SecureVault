@@ -13,6 +13,8 @@ import {
   base64ToArrayBuffer,
   importFileKey,
   decryptSharedFile,
+  isEncryptedFilename,
+  decryptEncryptedFilename,
 } from './publicShareCrypto';
 
 interface SharedFile {
@@ -148,28 +150,49 @@ export default function PublicShare() {
         const data = await publicRequestJson<PublicMeta>(`/public/${token}`);
 
         if (data.isFolder) {
-          // It's a folder share - ensure we always have folder object with children array
           setIsFolder(true);
           const folderData = data.folder;
           if (!folderData) {
             setError('Invalid share data');
           } else {
-            setFolder({
-              id: folderData.id,
-              filename: folderData.filename || 'Folder',
-              children: Array.isArray(folderData.children) ? folderData.children : [],
-            });
+            // Decrypt encrypted filenames in the folder tree using each file's own key
+            const decryptFolderItems = async (items: FolderItem[]): Promise<FolderItem[]> => {
+              return Promise.all(items.map(async (item) => {
+                let decryptedName = item.filename;
+                if (isEncryptedFilename(item.filename) && item.encryptedKey && fragment) {
+                  try {
+                    const itemKey = await importFileKey(fragment.key);
+                    decryptedName = await decryptEncryptedFilename(item.filename, itemKey);
+                  } catch { /* keep raw */ }
+                }
+                const children = item.children ? await decryptFolderItems(item.children) : undefined;
+                return { ...item, filename: decryptedName, children };
+              }));
+            };
+
+            const folderName = folderData.filename || 'Folder';
+            const children = Array.isArray(folderData.children) ? await decryptFolderItems(folderData.children) : [];
+
+            setFolder({ id: folderData.id, filename: folderName, children });
           }
         } else {
-          // It's a single file share
           setIsFolder(false);
           const sharedFile = data.file;
           if (!sharedFile) {
             setError('Invalid share data');
           } else {
-            setFile(sharedFile);
-            if (fragment && isPreviewable(sharedFile.filename)) {
-              loadPreview(fragment.key, fragment.iv, sharedFile.filename);
+            // Decrypt encrypted filename using the key from the URL fragment
+            let displayName = sharedFile.filename;
+            if (fragment && isEncryptedFilename(sharedFile.filename)) {
+              try {
+                const fileKey = await importFileKey(fragment.key);
+                displayName = await decryptEncryptedFilename(sharedFile.filename, fileKey);
+              } catch { /* keep raw */ }
+            }
+            const decryptedFile = { ...sharedFile, filename: displayName };
+            setFile(decryptedFile);
+            if (fragment && isPreviewable(decryptedFile.filename)) {
+              loadPreview(fragment.key, fragment.iv, decryptedFile.filename);
             }
           }
         }

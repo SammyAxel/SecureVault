@@ -3,6 +3,7 @@ import * as api from '../lib/api';
 import { toast } from '../stores/toast';
 import { awaitMinElapsed, MIN_CONTENT_LOAD_MS, MIN_SILENT_REFRESH_MS } from '../lib/motion';
 import { logger } from '../lib/logger';
+import { formatAbsolute, formatRelative } from '../lib/time';
 
 export default function NotificationCenter() {
   const [notifications, setNotifications] = createSignal<api.NotificationItem[]>([]);
@@ -107,12 +108,7 @@ export default function NotificationCenter() {
 
   // Format time ago
   const timeAgo = (date: Date) => {
-    const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
-    if (seconds < 60) return 'Just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
-    return new Date(date).toLocaleDateString();
+    return formatRelative(date);
   };
 
   // Get icon for notification type
@@ -213,7 +209,9 @@ export default function NotificationCenter() {
                         </div>
                         <p class="text-sm text-gray-400 mt-1">{notification.message}</p>
                         <div class="flex items-center gap-3 mt-2">
-                          <span class="text-xs text-gray-500">{timeAgo(notification.createdAt)}</span>
+                          <span class="text-xs text-gray-500" title={formatAbsolute(notification.createdAt)}>
+                            {timeAgo(notification.createdAt)}
+                          </span>
                           <Show when={!notification.read}>
                             <button
                               onClick={() => markAsRead(notification.id)}

@@ -27,3 +27,23 @@ export async function decryptSharedFile(encrypted: ArrayBuffer, key: CryptoKey, 
     encrypted
   );
 }
+
+/** Check whether a filename string is in the encrypted JSON format. */
+export function isEncryptedFilename(filename: string): boolean {
+  if (!filename || filename[0] !== '{') return false;
+  try {
+    const parsed = JSON.parse(filename);
+    return typeof parsed === 'object' && parsed !== null && 'c' in parsed && 'n' in parsed;
+  } catch {
+    return false;
+  }
+}
+
+/** Decrypt an encrypted filename JSON string using an AES-GCM key. */
+export async function decryptEncryptedFilename(encryptedJson: string, key: CryptoKey): Promise<string> {
+  const { c, n } = JSON.parse(encryptedJson);
+  const ciphertext = base64ToArrayBuffer(c);
+  const iv = new Uint8Array(base64ToArrayBuffer(n));
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
+  return new TextDecoder().decode(decrypted);
+}

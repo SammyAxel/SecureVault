@@ -3,6 +3,7 @@ import * as api from '../lib/api';
 import type { FileItem } from '../lib/api';
 import { formatSize } from '../lib/format';
 import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../lib/motion';
+import { formatAbsolute, formatRelative } from '../lib/time';
 
 export default function Home(props: {
   search: string;
@@ -26,8 +27,8 @@ export default function Home(props: {
       try {
         const res = await api.listFiles();
         setFiles(res.files);
-      } catch (e: any) {
-        setLoadError(e?.message || 'Something went wrong while loading Home.');
+      } catch (e: unknown) {
+        setLoadError(e instanceof Error ? e.message : 'Something went wrong while loading Home.');
       } finally {
         await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
         setIsLoading(false);
@@ -82,12 +83,27 @@ export default function Home(props: {
         </div>
       </Show>
 
-      <Show when={!isLoading()} fallback={
-        <div class="bg-gray-800/60 border border-gray-700 rounded-xl p-6 animate-sv-rise">
-          <div class="animate-spin rounded-full h-8 w-8 border-2 border-primary-500/30 border-t-primary-500 mx-auto mb-3"></div>
-          <p class="text-gray-400 text-center text-sm">Loading…</p>
-        </div>
-      }>
+      <Show
+        when={!isLoading()}
+        fallback={
+          <div class="bg-gray-900 rounded-lg border border-gray-800">
+            <div class="p-6">
+              <div class="h-6 w-40 bg-gray-700 rounded animate-pulse mb-5" />
+              <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-3 mb-8">
+                <For each={[0, 1, 2, 3, 4, 5]}>
+                  {() => <div class="h-20 bg-gray-800/60 border border-gray-700 rounded-xl animate-pulse" />}
+                </For>
+              </div>
+              <div class="h-6 w-36 bg-gray-700 rounded animate-pulse mb-4" />
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-3">
+                <For each={[0, 1, 2, 3]}>
+                  {() => <div class="h-20 bg-gray-800/60 border border-gray-700 rounded-xl animate-pulse" />}
+                </For>
+              </div>
+            </div>
+          </div>
+        }
+      >
         <Show when={!loadError()}>
           <Show when={vaultEmpty()}>
             <div class="bg-gray-800/40 border border-gray-700 rounded-xl p-8 text-center mb-8">
@@ -181,7 +197,12 @@ export default function Home(props: {
                   <div class="bg-gray-800/60 border border-gray-700 rounded-xl p-4 flex items-center justify-between gap-3">
                     <div class="min-w-0">
                       <div class="text-white font-medium truncate">{f.filename}</div>
-                      <div class="text-xs text-gray-500 mt-0.5">{formatSize(f.fileSize, { zero: 'dash' })} • {new Date(f.createdAt).toLocaleDateString()}</div>
+                      <div
+                        class="text-xs text-gray-500 mt-0.5"
+                        title={formatAbsolute(f.createdAt)}
+                      >
+                        {formatSize(f.fileSize, { zero: 'dash' })} • {formatRelative(f.createdAt)}
+                      </div>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
                       <button

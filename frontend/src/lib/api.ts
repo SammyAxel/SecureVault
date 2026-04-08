@@ -34,15 +34,20 @@ async function request<T>(
     headers,
   });
   
-  // Handle empty responses
   const text = await response.text();
-  const data = text ? JSON.parse(text) : {};
-  
-  if (!response.ok) {
-    throw new ApiError(response.status, data.msg || 'Request failed', data);
+  let data: unknown = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new ApiError(response.status, 'Invalid response from server');
   }
-  
-  return data;
+
+  if (!response.ok) {
+    const obj = data as { msg?: string; quotaExceeded?: boolean };
+    throw new ApiError(response.status, obj.msg || 'Request failed', obj);
+  }
+
+  return data as T;
 }
 
 /** JSON GET/POST without Authorization (public share links, etc.). */
@@ -176,6 +181,98 @@ export async function verifyLogin(
   });
 }
 
+export type DeviceLinkStatus = 'pending' | 'completed' | 'expired' | 'expired_or_invalid';
+
+export async function createDeviceLinkSession(opts?: {
+  encryptedKeys?: string;
+  encryptedKeysIv?: string;
+}) {
+  return request<{
+    ok: boolean;
+    pairingId: string;
+    linkSecret: string;
+    expiresAt: string;
+    username: string;
+    qrCodeDataUrl: string;
+    linkUrl: string;
+  }>('/auth/device-link/create', {
+    method: 'POST',
+    body: JSON.stringify({
+      encryptedKeys: opts?.encryptedKeys,
+      encryptedKeysIv: opts?.encryptedKeysIv,
+    }),
+  });
+}
+
+export async function getDeviceLinkStatus(pairingId: string) {
+  return request<{ ok: boolean; status: DeviceLinkStatus }>(
+    `/auth/device-link/status?pairingId=${encodeURIComponent(pairingId)}`
+  );
+}
+
+export async function getDeviceLinkChallenge(
+  pairingId: string,
+  linkSecret: string,
+  deviceFingerprint?: string
+) {
+  return publicRequestJson<{
+    ok: boolean;
+    challenge: string;
+    challengeId: string;
+    username: string;
+    requires2FA: boolean;
+    encryptedKeys: string | null;
+    encryptedKeysIv: string | null;
+  }>('/auth/device-link/challenge', {
+    method: 'POST',
+    body: JSON.stringify({ pairingId, linkSecret, deviceFingerprint }),
+  });
+}
+
+export async function verifyDeviceLink(
+  pairingId: string,
+  linkSecret: string,
+  challengeId: string,
+  signature: string,
+  opts?: {
+    totp?: string;
+    trustDevice?: boolean;
+    deviceFingerprint?: string;
+    deviceName?: string;
+    browser?: string;
+    os?: string;
+    deviceInfo?: string;
+  }
+) {
+  return publicRequestJson<{
+    ok: boolean;
+    token: string;
+    expiresAt: string;
+    user: {
+      id: string;
+      username: string;
+      isAdmin: boolean;
+      storageUsed: number;
+      storageQuota: number;
+    };
+  }>('/auth/device-link/verify', {
+    method: 'POST',
+    body: JSON.stringify({
+      pairingId,
+      linkSecret,
+      challengeId,
+      signature,
+      totp: opts?.totp,
+      trustDevice: opts?.trustDevice,
+      deviceFingerprint: opts?.deviceFingerprint,
+      deviceName: opts?.deviceName,
+      browser: opts?.browser,
+      os: opts?.os,
+      deviceInfo: opts?.deviceInfo,
+    }),
+  });
+}
+
 export async function logout() {
   return request<{ ok: boolean }>('/logout', { method: 'POST' });
 }
@@ -287,9 +384,15 @@ export interface FileItem {
   iv: string;
 }
 
-export async function listFiles(parentId?: string) {
-  const query = parentId ? `?parentId=${parentId}` : '';
-  return request<{ ok: boolean; files: FileItem[] }>(`/files${query}`);
+/** List folder contents. Pass `all=true` to return every file (for client-side search). */
+export async function listFiles(parentId?: string | null, nameSearch?: string, all?: boolean) {
+  const params = new URLSearchParams();
+  if (parentId) params.set('parentId', parentId);
+  const q = nameSearch?.trim();
+  if (q) params.set('q', q);
+  if (all) params.set('all', 'true');
+  const qs = params.toString();
+  return request<{ ok: boolean; files: FileItem[] }>(qs ? `/files?${qs}` : '/files');
 }
 
 export async function getFileByUid(uid: string) {
@@ -306,7 +409,8 @@ export async function uploadFile(
   encryptedKey: string,
   iv: string,
   fileHash: string,
-  parentId?: string
+  parentId?: string,
+  encryptedFilename?: string
 ) {
   const formData = new FormData();
   formData.append('file', new Blob([encryptedData]), file.name);
@@ -316,6 +420,9 @@ export async function uploadFile(
   if (parentId) {
     formData.append('parent_id', parentId);
   }
+  if (encryptedFilename) {
+    formData.append('encrypted_filename', encryptedFilename);
+  }
   
   return request<{ ok: boolean; fileId: string }>('/upload', {
     method: 'POST',
@@ -323,10 +430,15 @@ export async function uploadFile(
   });
 }
 
-export async function createFolder(name: string, parentId?: string) {
+export async function createFolder(
+  name: string,
+  parentId?: string,
+  encryptedKey?: string,
+  iv?: string
+) {
   return request<{ ok: boolean; folderId: string }>('/folders', {
     method: 'POST',
-    body: JSON.stringify({ name, parentId }),
+    body: JSON.stringify({ name, parentId, encryptedKey, iv }),
   });
 }
 
@@ -476,6 +588,8 @@ export async function getAllFolders() {
       id: string;
       filename: string;
       parentId: string | null;
+      encryptedKey?: string;
+      iv?: string;
     }>;
   }>('/folders');
 }
@@ -638,6 +752,19 @@ export async function getAuditLogs(page = 1, limit = 50) {
       totalPages: number;
     };
   }>(`/admin/audit-logs?page=${page}&limit=${limit}`);
+}
+
+export async function getMyAuditLogs(page = 1, limit = 30) {
+  return request<{
+    ok: boolean;
+    logs: AuditLogEntry[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }>(`/audit-logs?page=${page}&limit=${limit}`);
 }
 
 export async function getUserSessions(userId: string) {

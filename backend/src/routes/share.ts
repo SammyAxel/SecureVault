@@ -8,6 +8,7 @@ import { createNotification } from './notifications.js';
 import { z } from 'zod';
 import { logAudit } from './admin.js';
 import { getClientIp } from '../lib/clientIp.js';
+import { safeContentDisposition } from '../lib/sanitize.js';
 
 const shareWithUserSchema = z.object({
   fileId: z.string().uuid(),
@@ -403,7 +404,7 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     
     const stream = getStream(file.storagePath);
     reply.header('Content-Type', 'application/octet-stream');
-    reply.header('Content-Disposition', `attachment; filename="${file.filename}"`);
+    reply.header('Content-Disposition', safeContentDisposition(file.filename));
     reply.header('X-Encrypted-Key', file.encryptedKey);
     reply.header('X-IV', file.iv);
     return reply.send(stream);
@@ -431,7 +432,7 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     
     const stream = getStream(share.file.storagePath);
     reply.header('Content-Type', 'application/octet-stream');
-    reply.header('Content-Disposition', `attachment; filename="${share.file.filename}"`);
+    reply.header('Content-Disposition', safeContentDisposition(share.file.filename));
     reply.header('X-Encrypted-Key', share.file.encryptedKey);
     reply.header('X-IV', share.file.iv);
     

@@ -13,6 +13,8 @@ import { awaitMinElapsed, MIN_FORM_SUBMIT_MS } from '../lib/motion';
 
 interface LoginProps {
   onSwitchToRegister: () => void;
+  /** Optional: navigate to QR secondary-device login (e.g. `/login/link`). */
+  onGotoQrLogin?: () => void;
   /** When true, show demo key download below the login card. */
   isDemoMode?: boolean;
   /** Pre-filled username (e.g. demo_admin from server in demo mode). */
@@ -46,8 +48,8 @@ export default function Login(props: LoginProps) {
       try {
         const bundle = await loadKeyBundleFromFile(file);
         setKeyBundle(bundle);
-      } catch (err: any) {
-        setError(err.message || 'Invalid key file format');
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Invalid key file format');
         setKeyBundle(null);
       }
     }
@@ -76,8 +78,8 @@ export default function Login(props: LoginProps) {
       }
 
       await completeLogin(challenge, challengeId);
-    } catch (err: any) {
-      setError(err.message || 'Login failed');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Login failed');
       await awaitMinElapsed(opStart, MIN_FORM_SUBMIT_MS);
       setIsLoading(false);
     }
@@ -120,8 +122,8 @@ export default function Login(props: LoginProps) {
         ...result.user,
         totpEnabled: requires2FA(),
       });
-    } catch (err: any) {
-      setError(err.message || 'Login failed');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
       await awaitMinElapsed(opStart, MIN_FORM_SUBMIT_MS);
       setIsLoading(false);
@@ -246,19 +248,35 @@ export default function Login(props: LoginProps) {
           </button>
         </form>
 
-        <Show when={!props.isDemoMode}>
-          <div class="mt-6 text-center">
+        <div class="mt-6 text-center space-y-3">
+          <Show when={!props.isDemoMode && props.onGotoQrLogin}>
+            <p class="text-gray-400 text-sm">
+              On your phone?{' '}
+              <button
+                type="button"
+                onClick={() => props.onGotoQrLogin?.()}
+                class="text-primary-400 hover:text-primary-300"
+              >
+                Log in with QR link
+              </button>
+              <span class="text-gray-500 block text-xs mt-1">
+                Scan the code from Profile &rarr; Security on your computer first.
+              </span>
+            </p>
+          </Show>
+          <Show when={!props.isDemoMode}>
             <p class="text-gray-400">
               Don't have an account?{' '}
               <button
+                type="button"
                 onClick={props.onSwitchToRegister}
                 class="text-primary-400 hover:text-primary-300"
               >
                 Register
               </button>
             </p>
-          </div>
-        </Show>
+          </Show>
+        </div>
       </div>
 
       <Show when={props.isDemoMode}>

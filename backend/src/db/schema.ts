@@ -105,6 +105,26 @@ export const notifications = sqliteTable('notifications', {
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 
+// ============ PENDING CHALLENGES (replaces in-memory Map) ============
+export const pendingChallenges = sqliteTable('pending_challenges', {
+  id: text('id').primaryKey(),
+  challenge: text('challenge').notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  deviceLinkPairingId: text('device_link_pairing_id'),
+});
+
+// ============ PENDING DEVICE LINKS (replaces in-memory Map) ============
+export const pendingDeviceLinks = sqliteTable('pending_device_links', {
+  pairingId: text('pairing_id').primaryKey(),
+  linkSecret: text('link_secret').notNull(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  username: text('username').notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  completedAt: integer('completed_at', { mode: 'timestamp' }),
+  encryptedKeys: text('encrypted_keys'),
+  encryptedKeysIv: text('encrypted_keys_iv'),
+});
+
 // ============ TRUSTED DEVICES ============
 export const trustedDevices = sqliteTable('trusted_devices', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -178,3 +198,5 @@ export type AuditLog = typeof auditLogs.$inferSelect;
 export type NewAuditLog = typeof auditLogs.$inferInsert;
 export type Setting = typeof settings.$inferSelect;
 export type NewSetting = typeof settings.$inferInsert;
+export type PendingChallenge = typeof pendingChallenges.$inferSelect;
+export type PendingDeviceLink = typeof pendingDeviceLinks.$inferSelect;

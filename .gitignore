@@ -20,6 +20,9 @@ storage/
 # Local config (use storage.json.example as template)
 backend/config/storage.json
 
+# Local backlog
+POTENTIAL_TODOS.md
+
 # Environment & secrets
 .env
 .env.*
@@ -46,6 +49,9 @@ docker-compose.override.yml
 .idea/
 *.swp
 *.swo
+
+# Cursor (AI editor artifacts)
+.cursor/plans/
 
 # OS
 .DS_Store
