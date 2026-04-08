@@ -1,0 +1,16 @@
+node_modules
+*/node_modules
+npm-debug.log*
+.git
+.github
+.cursor
+.vscode
+*.md
+!README.md
+backend/dist
+frontend/dist
+.env
+.env.*
+docker-compose*.yml
+Dockerfile
+.dockerignore
