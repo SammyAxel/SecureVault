@@ -39,8 +39,8 @@ export default function Login(props: LoginProps) {
       try {
         const bundle = await loadKeyBundleFromFile(file);
         setKeyBundle(bundle);
-      } catch (err: any) {
-        setError(err.message || 'Invalid key file format');
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Invalid key file format');
         setKeyBundle(null);
       }
     }
@@ -69,8 +69,8 @@ export default function Login(props: LoginProps) {
       }
 
       await completeLogin(challenge, challengeId);
-    } catch (err: any) {
-      setError(err.message || 'Login failed');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Login failed');
       await awaitMinElapsed(opStart, MIN_FORM_SUBMIT_MS);
       setIsLoading(false);
     }
@@ -113,8 +113,8 @@ export default function Login(props: LoginProps) {
         ...result.user,
         totpEnabled: requires2FA(),
       });
-    } catch (err: any) {
-      setError(err.message || 'Login failed');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
       await awaitMinElapsed(opStart, MIN_FORM_SUBMIT_MS);
       setIsLoading(false);

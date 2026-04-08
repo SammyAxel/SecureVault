@@ -29,7 +29,7 @@ export default function DriveNavPanel(props: {
     props.afterNavigate?.();
   };
 
-  const NavItem = (p: { id: DriveSection; label: string; icon: any }) => (
+  const NavItem = (p: { id: DriveSection; label: string; icon: import('solid-js').JSX.Element }) => (
     <button
       type="button"
       onClick={() => go(p.id)}

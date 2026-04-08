@@ -27,8 +27,8 @@ export default function Home(props: {
       try {
         const res = await api.listFiles();
         setFiles(res.files);
-      } catch (e: any) {
-        setLoadError(e?.message || 'Something went wrong while loading Home.');
+      } catch (e: unknown) {
+        setLoadError(e instanceof Error ? e.message : 'Something went wrong while loading Home.');
       } finally {
         await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
         setIsLoading(false);

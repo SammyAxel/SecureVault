@@ -80,7 +80,7 @@ export default function FileViewer(props: FileViewerProps) {
             fileData = { ...fileData, filename: await decryptFilename(fileData.filename, fk) };
           }
           pathData = await Promise.all(
-            pathData.map(async (p: any) => {
+            pathData.map(async (p: { id: string; uid: string | null; name: string; encryptedKey?: string }) => {
               if (!isEncryptedFilename(p.name) || !p.encryptedKey) return p;
               try {
                 const fk = await unwrapKey(p.encryptedKey, privateKey);
@@ -116,16 +116,18 @@ export default function FileViewer(props: FileViewerProps) {
       } else {
         await loadPreview(fileData);
       }
-    } catch (err: any) {
-      if (err.status === 403 || err.message?.includes('403') || err.message?.includes('Access denied')) {
+    } catch (err: unknown) {
+      const errObj = err instanceof Error ? err : null;
+      const status = (err as { status?: number })?.status;
+      if (status === 403 || errObj?.message?.includes('403') || errObj?.message?.includes('Access denied')) {
         setErrorType('unauthorized');
         setError('You do not have access to this file');
-      } else if (err.status === 404 || err.message?.includes('404') || err.message?.includes('not found')) {
+      } else if (status === 404 || errObj?.message?.includes('404') || errObj?.message?.includes('not found')) {
         setErrorType('notfound');
         setError('File or folder not found');
       } else {
         setErrorType('error');
-        setError(err.message || 'Failed to load');
+        setError(errObj?.message || 'Failed to load');
       }
     } finally {
       await awaitMinElapsed(started, MIN_CONTENT_LOAD_MS);
@@ -160,7 +162,7 @@ export default function FileViewer(props: FileViewerProps) {
       const blob = new Blob([decrypted], { type: mimeType });
       const url = URL.createObjectURL(blob);
       setPreviewUrl(url);
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error('Failed to decrypt file:', err);
       setError('Failed to decrypt file');
     }
@@ -202,8 +204,8 @@ export default function FileViewer(props: FileViewerProps) {
       } else {
         await saveBlobToDevice(blob, f.filename);
       }
-    } catch (err: any) {
-      toast.error(`Download failed: ${err.message}`);
+    } catch (err: unknown) {
+      toast.error(`Download failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setIsDownloading(false);
     }
@@ -462,7 +464,7 @@ export default function FileViewer(props: FileViewerProps) {
             {/* Filter toolbar */}
             <div class="bg-[#111111] border-b border-gray-800">
               <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
-                <select value={filterType()} onChange={(e) => setFilterType(e.target.value as any)} class="px-3 py-1.5 bg-[#1e1e1e] border border-gray-700 rounded-lg text-gray-300 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500">
+                <select value={filterType()} onChange={(e) => setFilterType(e.target.value as 'all' | 'folders' | 'files')} class="px-3 py-1.5 bg-[#1e1e1e] border border-gray-700 rounded-lg text-gray-300 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500">
                   <option value="all">Type</option>
                   <option value="folders">Folders</option>
                   <option value="files">Files</option>

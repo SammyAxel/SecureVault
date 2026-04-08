@@ -170,7 +170,7 @@ export default function PublicShare() {
               }));
             };
 
-            let folderName = folderData.filename || 'Folder';
+            const folderName = folderData.filename || 'Folder';
             const children = Array.isArray(folderData.children) ? await decryptFolderItems(folderData.children) : [];
 
             setFolder({ id: folderData.id, filename: folderName, children });
