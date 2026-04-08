@@ -1,5 +1,14 @@
 import { createSignal, createEffect } from 'solid-js';
 
+// NOTE: This custom router is lightweight and works well for the current route set.
+// If the app grows significantly (nested layouts, route guards, animated transitions,
+// preloading), consider migrating to @solidjs/router which provides:
+//   - Declarative <Route> definitions with nested layouts
+//   - Built-in route guards and data preloading
+//   - Animated route transitions via <Transition>
+//   - Typed route params
+// Migration guide: https://docs.solidjs.com/solid-router
+
 export function syncLocationToSignals(
   setPath: (p: string) => void,
   setSearch: (s: string) => void,

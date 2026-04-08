@@ -787,8 +787,6 @@ function SessionsTab() {
     return { browser, os };
   };
 
-  const formatDate = (date: string) => formatAbsolute(date);
-
   return (
     <div class="space-y-6">
       <div class="bg-gray-800 rounded-xl p-6">

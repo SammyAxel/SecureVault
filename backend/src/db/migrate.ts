@@ -150,66 +150,72 @@ db.exec(`
 libLogger.info('Database tables created/verified');
 
 // ============ MIGRATIONS ============
-// Helper to check if column exists
+// Incremental column/table additions for databases created before the schema was extended.
+// New tables should be added as CREATE TABLE IF NOT EXISTS in the block above.
+// For greenfield deployments, the initial CREATE TABLE block handles everything.
+
 function hasColumn(table: string, column: string): boolean {
-  const columns = db.pragma(`table_info(${table})`) as any[];
+  const columns = db.pragma(`table_info(${table})`) as { name: string }[];
   return columns.some((col) => col.name === column);
 }
 
-// Migration 1: Add 'uid' column to files table
-if (!hasColumn('files', 'uid')) {
-  libLogger.info('Running migration: Adding uid column to files table');
+function hasTable(name: string): boolean {
+  const rows = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").all(name) as { name: string }[];
+  return rows.length > 0;
+}
+
+function runMigration(label: string, fn: () => void) {
   try {
+    fn();
+    libLogger.info(`Migration OK: ${label}`);
+  } catch (error) {
+    libLogger.error({ err: error }, `Migration failed: ${label}`);
+    throw error;
+  }
+}
+
+if (!hasColumn('files', 'uid'))
+  runMigration('files.uid', () => {
     db.exec('ALTER TABLE files ADD COLUMN uid TEXT');
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_files_uid ON files(uid)');
-    libLogger.info('Migration successful: uid column added');
-  } catch (error) {
-    libLogger.error({ err: error }, 'Migration failed (uid)');
-    throw error;
-  }
-}
+  });
 
-// Migration 2: Add 'avatar' column to users table
-if (!hasColumn('users', 'avatar')) {
-  libLogger.info('Running migration: Adding avatar column to users table');
-  try {
-    db.exec('ALTER TABLE users ADD COLUMN avatar TEXT');
-    libLogger.info('Migration successful: avatar column added');
-  } catch (error) {
-    libLogger.error({ err: error }, 'Migration failed (avatar)');
-    throw error;
-  }
-}
+if (!hasColumn('users', 'avatar'))
+  runMigration('users.avatar', () => db.exec('ALTER TABLE users ADD COLUMN avatar TEXT'));
 
-// Migration 3: Add 'display_name' column to users table
-if (!hasColumn('users', 'display_name')) {
-  libLogger.info('Running migration: Adding display_name column to users table');
-  try {
-    db.exec('ALTER TABLE users ADD COLUMN display_name TEXT');
-    libLogger.info('Migration successful: display_name column added');
-  } catch (error) {
-    libLogger.error({ err: error }, 'Migration failed (display_name)');
-    throw error;
-  }
-}
+if (!hasColumn('users', 'display_name'))
+  runMigration('users.display_name', () => db.exec('ALTER TABLE users ADD COLUMN display_name TEXT'));
 
-// Migration 4: Create settings table if not exists
-const tableList = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'").all() as { name: string }[];
-if (tableList.length === 0) {
-  libLogger.info('Running migration: Creating settings table');
-  try {
+if (!hasTable('settings'))
+  runMigration('settings table', () => db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)'));
+
+if (!hasTable('pending_challenges'))
+  runMigration('pending_challenges table', () => {
     db.exec(`
-      CREATE TABLE settings (
-        key TEXT PRIMARY KEY,
-        value TEXT
-      );
+      CREATE TABLE pending_challenges (
+        id TEXT PRIMARY KEY NOT NULL,
+        challenge TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        device_link_pairing_id TEXT
+      )
     `);
-    libLogger.info('Migration successful: settings table created');
-  } catch (error) {
-    libLogger.error({ err: error }, 'Migration failed (settings)');
-    throw error;
-  }
-}
+  });
+
+if (!hasTable('pending_device_links'))
+  runMigration('pending_device_links table', () => {
+    db.exec(`
+      CREATE TABLE pending_device_links (
+        pairing_id TEXT PRIMARY KEY NOT NULL,
+        link_secret TEXT NOT NULL,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        username TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        encrypted_keys TEXT,
+        encrypted_keys_iv TEXT
+      )
+    `);
+  });
 
 libLogger.info('All database migrations completed');
 db.close();

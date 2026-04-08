@@ -144,6 +144,43 @@ export async function decryptFile(
   );
 }
 
+// ============ FILENAME ENCRYPTION (AES-GCM, per-file key) ============
+
+/**
+ * Encrypt a filename using the file's AES-GCM key.
+ * Returns a JSON string: {"c":"<base64 ciphertext>","n":"<base64 iv>"}
+ */
+export async function encryptFilename(name: string, key: CryptoKey): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(name);
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
+  return JSON.stringify({ c: arrayBufferToBase64(ciphertext), n: arrayBufferToBase64(iv) });
+}
+
+/**
+ * Decrypt an encrypted filename JSON string using the file's AES-GCM key.
+ */
+export async function decryptFilename(encryptedJson: string, key: CryptoKey): Promise<string> {
+  const { c, n } = JSON.parse(encryptedJson);
+  const ciphertext = base64ToArrayBuffer(c);
+  const iv = base64ToUint8Array(n);
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv as BufferSource }, key, ciphertext);
+  return new TextDecoder().decode(decrypted);
+}
+
+/**
+ * Check whether a filename string is in the encrypted JSON format.
+ */
+export function isEncryptedFilename(filename: string): boolean {
+  if (!filename || filename[0] !== '{') return false;
+  try {
+    const parsed = JSON.parse(filename);
+    return typeof parsed === 'object' && parsed !== null && 'c' in parsed && 'n' in parsed;
+  } catch {
+    return false;
+  }
+}
+
 // ============ KEY WRAPPING ============
 
 export async function wrapKey(fileKey: CryptoKey, publicKey: CryptoKey): Promise<string> {

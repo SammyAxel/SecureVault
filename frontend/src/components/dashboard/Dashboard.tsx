@@ -32,6 +32,10 @@ import {
   unwrapKey,
   base64ToUint8Array,
   arrayBufferToBase64,
+  generateFileKey,
+  encryptFilename,
+  decryptFilename,
+  isEncryptedFilename,
 } from '../../lib/crypto';
 
 // Helper to get MIME type from filename
@@ -217,6 +221,38 @@ export default function Dashboard(props: DashboardProps) {
     });
   });
 
+  /**
+   * Decrypt encrypted filenames in-place for a list of file items.
+   * Files whose filenames are not encrypted are left untouched (backward compat).
+   */
+  const decryptFileNames = async (items: FileItem[]): Promise<FileItem[]> => {
+    const keys = getCurrentKeys();
+    if (!keys) return items;
+
+    const hasEncrypted = items.some((f) => isEncryptedFilename(f.filename));
+    if (!hasEncrypted) return items;
+
+    let privateKey: CryptoKey;
+    try {
+      privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
+    } catch {
+      return items;
+    }
+
+    return Promise.all(
+      items.map(async (f) => {
+        if (!isEncryptedFilename(f.filename) || !f.encryptedKey) return f;
+        try {
+          const fileKey = await unwrapKey(f.encryptedKey, privateKey);
+          const name = await decryptFilename(f.filename, fileKey);
+          return { ...f, filename: name };
+        } catch {
+          return f;
+        }
+      })
+    );
+  };
+
   // Load files for the active section
   const loadFiles = async () => {
     const started = Date.now();
@@ -225,48 +261,51 @@ export default function Dashboard(props: DashboardProps) {
     try {
       if (section() === 'drive') {
         const sq = searchQuery().trim();
-        const result = await api.listFiles(
-          sq ? undefined : currentFolder() || undefined,
-          sq || undefined,
-        );
-        setFiles(result.files);
+        let result: { ok: boolean; files: FileItem[] };
+        if (sq) {
+          // Client-side search: fetch all files, decrypt names, then filter
+          result = await api.listFiles(undefined, undefined, true);
+          const decrypted = await decryptFileNames(result.files);
+          const lower = sq.toLowerCase();
+          setFiles(decrypted.filter((f) => f.filename.toLowerCase().includes(lower)));
+        } else {
+          result = await api.listFiles(currentFolder() || undefined);
+          setFiles(await decryptFileNames(result.files));
+        }
         return;
       }
       if (section() === 'shared') {
         const result = await api.getSharedWithMe();
-        // Map to FileItem shape (owner shown via filename suffix for now in UI layer below)
-        setFiles(
-          result.files.map((f: any) => ({
-            id: f.id,
-            uid: undefined,
-            filename: f.filename,
-            fileSize: f.fileSize,
-            isFolder: f.isFolder,
-            parentId: null,
-            createdAt: f.sharedAt,
-            encryptedKey: f.encryptedKey,
-            iv: f.iv,
-            owner: f.owner,
-          }))
-        );
+        const mapped: FileItem[] = result.files.map((f: any) => ({
+          id: f.id,
+          uid: undefined,
+          filename: f.filename,
+          fileSize: f.fileSize,
+          isFolder: f.isFolder,
+          parentId: null,
+          createdAt: f.sharedAt,
+          encryptedKey: f.encryptedKey,
+          iv: f.iv,
+          owner: f.owner,
+        }));
+        setFiles(await decryptFileNames(mapped));
         return;
       }
       if (section() === 'trash') {
         const result = await api.getTrash();
-        setFiles(
-          result.files.map((f: any) => ({
-            id: f.id,
-            uid: undefined,
-            filename: f.filename,
-            fileSize: f.fileSize,
-            isFolder: f.isFolder,
-            parentId: f.parentId,
-            createdAt: f.deletedAt,
-            deletedAt: f.deletedAt,
-            encryptedKey: '',
-            iv: '',
-          }))
-        );
+        const mapped: FileItem[] = result.files.map((f: any) => ({
+          id: f.id,
+          uid: undefined,
+          filename: f.filename,
+          fileSize: f.fileSize,
+          isFolder: f.isFolder,
+          parentId: f.parentId,
+          createdAt: f.deletedAt,
+          deletedAt: f.deletedAt,
+          encryptedKey: f.encryptedKey || '',
+          iv: f.iv || '',
+        }));
+        setFiles(await decryptFileNames(mapped));
         return;
       }
     } catch (error) {
@@ -320,20 +359,45 @@ export default function Dashboard(props: DashboardProps) {
         if (cancelled) return;
         if (!result?.file) return;
 
+        // Decrypt encrypted folder/file names in path + current item
+        const keys = getCurrentKeys();
+        let decryptedParents = (result.parentPath || []).map((p: any) => ({ id: p.id, uid: p.uid, name: p.name, encryptedKey: p.encryptedKey }));
+        let currentName = result.file.filename;
+
+        if (keys) {
+          try {
+            const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
+            decryptedParents = await Promise.all(
+              decryptedParents.map(async (p: any) => {
+                if (!isEncryptedFilename(p.name) || !p.encryptedKey) return p;
+                try {
+                  const fk = await unwrapKey(p.encryptedKey, privateKey);
+                  return { ...p, name: await decryptFilename(p.name, fk) };
+                } catch { return p; }
+              })
+            );
+            if (isEncryptedFilename(currentName) && result.file.encryptedKey) {
+              try {
+                const fk = await unwrapKey(result.file.encryptedKey, privateKey);
+                currentName = await decryptFilename(currentName, fk);
+              } catch { /* keep raw */ }
+            }
+          } catch { /* ignore */ }
+        }
+
         const root = { id: null, uid: null, name: 'My Files' as const };
-        const parents = (result.parentPath || []).map((p) => ({ id: p.id, uid: p.uid, name: p.name }));
-        const current = { id: result.file.id, uid: result.file.uid || null, name: result.file.filename };
+        const parents = decryptedParents.map((p: any) => ({ id: p.id, uid: p.uid, name: p.name }));
+        const current = { id: result.file.id, uid: result.file.uid || null, name: currentName };
 
         if (result.file.isFolder) {
           setFolderPath([root, ...parents, current]);
           setCurrentFolderUid(result.file.uid || null);
           setCurrentFolder(result.file.id);
         } else {
-          // If UID points to a file, keep folder context but open preview (if possible)
           setFolderPath([root, ...parents]);
           setCurrentFolderUid(parents.length ? parents[parents.length - 1].uid : null);
           setCurrentFolder(parents.length ? parents[parents.length - 1].id : null);
-          await handleOpen(result.file);
+          await handleOpen({ ...result.file, filename: currentName });
         }
       } catch (e) {
         if (cancelled) return;
@@ -500,6 +564,9 @@ export default function Dashboard(props: DashboardProps) {
         // Encrypt file
         const { encrypted, key, iv } = await encryptFile(arrayBuffer);
 
+        // Encrypt filename with the same per-file AES key (zero-knowledge)
+        const encName = await encryptFilename(file.name, key);
+
         // Wrap key with user's public key
         const publicKey = await importEncryptionPublicKey(keys.encryptionPublicKey);
         const wrappedKey = await wrapKey(key, publicKey);
@@ -513,7 +580,8 @@ export default function Dashboard(props: DashboardProps) {
           wrappedKey,
           arrayBufferToBase64(iv),
           fileHash,
-          parentId || undefined
+          parentId || undefined,
+          encName
         );
 
         setUploadProgress(null);
@@ -832,8 +900,19 @@ export default function Dashboard(props: DashboardProps) {
     const file = renameFile();
     if (!file || !renameName().trim()) return;
 
+    const keys = getCurrentKeys();
+    if (!keys) {
+      toast.error('Please login again - keys not found');
+      return;
+    }
+
     try {
-      await api.renameFile(file.id, renameName().trim());
+      // Re-encrypt the new name with the file's AES key
+      const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
+      const fileKey = await unwrapKey(file.encryptedKey, privateKey);
+      const encName = await encryptFilename(renameName().trim(), fileKey);
+
+      await api.renameFile(file.id, encName);
       setRenameFile(null);
       setRenameName('');
       toast.success('File renamed successfully');
@@ -847,9 +926,30 @@ export default function Dashboard(props: DashboardProps) {
   const openMoveModal = async (file: FileItem) => {
     try {
       const result = await api.getAllFolders();
-      // Filter out the file itself if it's a folder (can't move into itself or descendants)
       const filteredFolders = result.folders.filter(f => f.id !== file.id);
-      setAllFolders(filteredFolders);
+
+      // Decrypt encrypted folder names for the move dialog
+      const keys = getCurrentKeys();
+      let decryptedFolders = filteredFolders;
+      if (keys) {
+        try {
+          const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
+          decryptedFolders = await Promise.all(
+            filteredFolders.map(async (f) => {
+              if (!isEncryptedFilename(f.filename) || !f.encryptedKey) return f;
+              try {
+                const fk = await unwrapKey(f.encryptedKey, privateKey);
+                const name = await decryptFilename(f.filename, fk);
+                return { ...f, filename: name };
+              } catch {
+                return f;
+              }
+            })
+          );
+        } catch { /* show raw on failure */ }
+      }
+
+      setAllFolders(decryptedFolders);
       setMoveFile(file);
       setSelectedMoveTarget(file.parentId);
     } catch (error: any) {
@@ -882,8 +982,26 @@ export default function Dashboard(props: DashboardProps) {
     const name = newFolderName().trim();
     if (!name) return;
 
+    const keys = getCurrentKeys();
+    if (!keys) {
+      toast.error('Please login again - keys not found');
+      return;
+    }
+
     try {
-      await api.createFolder(name, currentFolder() || undefined);
+      // Generate an AES key for the folder (used to encrypt folder name)
+      const folderKey = await generateFileKey();
+      const encName = await encryptFilename(name, folderKey);
+      const publicKey = await importEncryptionPublicKey(keys.encryptionPublicKey);
+      const wrappedKey = await wrapKey(folderKey, publicKey);
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+
+      await api.createFolder(
+        encName,
+        currentFolder() || undefined,
+        wrappedKey,
+        arrayBufferToBase64(iv),
+      );
       toast.success('Folder created successfully');
       setShowCreateFolder(false);
       setNewFolderName('');

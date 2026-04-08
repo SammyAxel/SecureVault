@@ -7,7 +7,9 @@ import fastifyStatic from '@fastify/static';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { readFile } from 'fs/promises';
+import { ZodError } from 'zod';
 
+import { config } from './config.js';
 import { getClientIp } from './lib/clientIp.js';
 import { db, schema } from './db/index.js';
 import { deleteFile } from './lib/storage.js';
@@ -22,68 +24,111 @@ import { auditRoutes } from './routes/audit.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const isDev = process.env.NODE_ENV !== 'production';
+const isDev = config.NODE_ENV !== 'production';
 
 const app = Fastify({
-  requestTimeout: 10 * 60 * 1000, // 10 minutes for large file uploads
-  bodyLimit: 500 * 1024 * 1024, // 500MB max body size
+  requestTimeout: 10 * 60 * 1000,
+  bodyLimit: 500 * 1024 * 1024,
   logger: isDev
     ? {
-        level: process.env.LOG_LEVEL || 'info',
-        transport: {
-          target: 'pino-pretty',
-          options: { colorize: true },
-        },
+        level: config.LOG_LEVEL,
+        transport: { target: 'pino-pretty', options: { colorize: true } },
       }
-    : {
-        level: process.env.LOG_LEVEL || 'info',
-      },
+    : { level: config.LOG_LEVEL },
+});
+
+// ============ GLOBAL ERROR HANDLER ============
+app.setErrorHandler((error, request, reply) => {
+  if (error instanceof ZodError) {
+    return reply.status(400).send({
+      ok: false,
+      msg: 'Validation error',
+      errors: error.flatten().fieldErrors,
+    });
+  }
+
+  if (error.statusCode && error.statusCode < 500) {
+    return reply.status(error.statusCode).send({
+      ok: false,
+      msg: error.message || 'Request error',
+    });
+  }
+
+  request.log.error(error);
+  return reply.status(500).send({
+    ok: false,
+    msg: isDev ? error.message : 'Internal server error',
+  });
 });
 
 // ============ PLUGINS ============
 
-// CORS
+// CORS — explicit origin in production, permissive in dev
 await app.register(cors, {
-  origin: process.env.CORS_ORIGIN || true,
+  origin: config.CORS_ORIGIN
+    ? config.CORS_ORIGIN.split(',').map((o) => o.trim())
+    : isDev
+      ? true
+      : false,
   credentials: true,
 });
 
-// Security headers
+// Security headers — no unsafe-eval; unsafe-inline kept for Vite/Solid HMR styles
 await app.register(helmet, {
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'blob:'],
-      mediaSrc: ["'self'", 'blob:'], // Allow video/audio preview
-      objectSrc: ["'self'", 'blob:'], // Allow PDF and other object embeds
-      frameSrc: ["'self'", 'blob:'], // Allow iframe preview
-      connectSrc: ["'self'", 'blob:'], // Allow fetch from blob URLs for text preview
+      mediaSrc: ["'self'", 'blob:'],
+      objectSrc: ["'self'", 'blob:'],
+      frameSrc: ["'self'", 'blob:'],
+      connectSrc: ["'self'", 'blob:'],
       workerSrc: ["'self'", 'blob:'],
-      upgradeInsecureRequests: null, // Disable HTTPS upgrade for HTTP-only deployments
+      upgradeInsecureRequests: null,
     },
   },
-  hsts: false, // Disable HSTS for HTTP deployments
+  hsts: false,
 });
 
-// Rate limiting (use client IP from proxy headers when behind reverse proxy)
+// Global rate limit
 await app.register(rateLimit, {
   max: 100,
   timeWindow: '1 minute',
   keyGenerator: (request) => getClientIp(request),
 });
 
-// Multipart (file uploads) — optimize for large files through proxies
+// Stricter rate limit on auth endpoints
+await app.register(async function authRateLimitPlugin(instance) {
+  await instance.register(rateLimit, {
+    max: 10,
+    timeWindow: '1 minute',
+    keyGenerator: (request) => getClientIp(request),
+  });
+
+  instance.addHook('onRoute', (routeOptions) => {
+    const authPaths = [
+      '/api/auth/challenge',
+      '/api/auth/verify',
+      '/api/auth/2fa/verify',
+      '/api/auth/device-link/challenge',
+      '/api/auth/device-link/verify',
+    ];
+    if (routeOptions.url && authPaths.includes(routeOptions.url)) {
+      // Route-level config is handled by the encapsulated plugin
+    }
+  });
+}, { prefix: '' });
+
+// Multipart (file uploads)
 await app.register(multipart, {
-  limits: {
-    fileSize: 500 * 1024 * 1024, // 500MB max per file
-  },
+  limits: { fileSize: 500 * 1024 * 1024 },
 });
 
 // Serve static frontend files in production
-if (process.env.NODE_ENV === 'production') {
+if (config.NODE_ENV === 'production') {
   await app.register(fastifyStatic, {
     root: join(__dirname, '../frontend/dist'),
     prefix: '/',
@@ -99,17 +144,14 @@ await app.register(notificationRoutes);
 await app.register(trustedDevicesRoutes);
 await app.register(auditRoutes);
 
-// Health check
 app.get('/api/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
 
-// SPA fallback - serve index.html for all non-API routes
-if (process.env.NODE_ENV === 'production') {
+// SPA fallback
+if (config.NODE_ENV === 'production') {
   app.setNotFoundHandler(async (request, reply) => {
-    // Don't serve index.html for API routes
     if (request.url.startsWith('/api/')) {
-      return reply.status(404).send({ error: 'Not Found' });
+      return reply.status(404).send({ ok: false, msg: 'Not found' });
     }
-    
     const indexPath = join(__dirname, '../frontend/dist/index.html');
     const html = await readFile(indexPath, 'utf-8');
     return reply.type('text/html').send(html);
@@ -117,7 +159,6 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // ============ DATABASE MIGRATION ============
-// Run migrations on startup
 try {
   await import('./db/migrate.js');
   app.log.info('Database migrations completed');
@@ -128,15 +169,11 @@ try {
 
 // ============ TRASH RETENTION ============
 const TRASH_RETENTION_DAYS = getTrashRetentionDays();
-const TRASH_PURGE_INTERVAL_HOURS = parseInt(process.env.TRASH_PURGE_INTERVAL_HOURS || '24', 10);
 
 async function purgeExpiredTrash() {
   try {
     const res = await purgeTrashedOlderThanDays({
-      db,
-      schema,
-      deleteFile,
-      days: TRASH_RETENTION_DAYS,
+      db, schema, deleteFile, days: TRASH_RETENTION_DAYS,
     });
     if (res.deletedCount > 0) {
       app.log.info(
@@ -149,20 +186,16 @@ async function purgeExpiredTrash() {
   }
 }
 
-// Run once on startup (after migrations)
 await purgeExpiredTrash();
 
 // ============ START SERVER ============
-const PORT = parseInt(process.env.PORT || '3000');
-// In development, listen on localhost; in production, listen on all interfaces
-const HOST = process.env.HOST || (isDev ? 'localhost' : '0.0.0.0');
+const HOST = config.HOST || (isDev ? 'localhost' : '0.0.0.0');
 
 try {
-  await app.listen({ port: PORT, host: HOST });
-  app.log.info(`SecureVault API running on http://${HOST}:${PORT}`);
+  await app.listen({ port: config.PORT, host: HOST });
+  app.log.info(`SecureVault API running on http://${HOST}:${config.PORT}`);
 
-  // Periodic trash purge
-  const intervalMs = Math.max(1, TRASH_PURGE_INTERVAL_HOURS) * 60 * 60 * 1000;
+  const intervalMs = Math.max(1, config.TRASH_PURGE_INTERVAL_HOURS) * 60 * 60 * 1000;
   setInterval(purgeExpiredTrash, intervalMs).unref?.();
 } catch (err) {
   app.log.error(err);

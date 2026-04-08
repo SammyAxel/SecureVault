@@ -9,14 +9,17 @@ import { getTrashRetentionDays, purgeTrashedOlderThanDays } from '../lib/trashRe
 import { z } from 'zod';
 import { logAudit } from './admin.js';
 import { getClientIp } from '../lib/clientIp.js';
+import { safeContentDisposition } from '../lib/sanitize.js';
 
 const createFolderSchema = z.object({
-  name: z.string().min(1).max(255),
+  name: z.string().min(1).max(2048),
   parentId: z.string().uuid().optional().nullable(),
+  encryptedKey: z.string().optional(),
+  iv: z.string().optional(),
 });
 
 const renameSchema = z.object({
-  name: z.string().min(1).max(255),
+  name: z.string().min(1).max(2048),
 });
 
 const moveSchema = z.object({
@@ -50,27 +53,51 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   };
 
   /** Breadcrumb chain from root to immediate parent of `file` (single query). */
-  const getParentPathOrdered = (startParentId: string): Array<{ id: string; uid: string | null; name: string }> => {
+  const getParentPathOrdered = (startParentId: string): Array<{ id: string; uid: string | null; name: string; encryptedKey?: string }> => {
     const rows = db.all(sql`
       WITH RECURSIVE ancestors AS (
-        SELECT id, uid, filename, parent_id, 0 AS depth FROM files WHERE id = ${startParentId}
+        SELECT id, uid, filename, parent_id, encrypted_key, 0 AS depth FROM files WHERE id = ${startParentId}
         UNION ALL
-        SELECT f.id, f.uid, f.filename, f.parent_id, a.depth + 1
+        SELECT f.id, f.uid, f.filename, f.parent_id, f.encrypted_key, a.depth + 1
         FROM files f
         INNER JOIN ancestors a ON f.id = a.parent_id
       )
-      SELECT id, uid, filename FROM ancestors ORDER BY depth DESC
-    `) as { id: string; uid: string | null; filename: string }[];
-    return rows.map((r) => ({ id: r.id, uid: r.uid, name: r.filename }));
+      SELECT id, uid, filename, encrypted_key FROM ancestors ORDER BY depth DESC
+    `) as { id: string; uid: string | null; filename: string; encrypted_key: string }[];
+    return rows.map((r) => ({ id: r.id, uid: r.uid, name: r.filename, encryptedKey: r.encrypted_key || undefined }));
   };
   
   // ============ LIST FILES ============
   app.get('/api/files', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
-    const { parentId, q } = request.query as { parentId?: string; q?: string };
+    const { parentId, q, all } = request.query as { parentId?: string; q?: string; all?: string };
     const qTrim = typeof q === 'string' ? q.trim().slice(0, 200) : '';
 
-    // Name search: entire My Drive tree (any depth), not only the current folder listing
+    const mapFile = (f: any) => ({
+      id: f.id,
+      uid: f.uid,
+      filename: f.filename,
+      fileSize: f.fileSize,
+      isFolder: f.isFolder,
+      parentId: f.parentId,
+      createdAt: f.createdAt,
+      encryptedKey: f.encryptedKey,
+      iv: f.iv,
+    });
+
+    // Return ALL user files (for client-side search with encrypted filenames)
+    if (all === 'true') {
+      const files = await db.query.files.findMany({
+        where: and(
+          eq(schema.files.ownerId, user.id),
+          eq(schema.files.isDeleted, false),
+        ),
+        orderBy: (files: any, { desc }: any) => [desc(files.isFolder), desc(files.createdAt)],
+      });
+      return { ok: true, files: files.map(mapFile) };
+    }
+
+    // Legacy name search (works with plaintext filenames only)
     if (qTrim.length > 0) {
       const files = await db.query.files.findMany({
         where: and(
@@ -80,21 +107,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         ),
         orderBy: (files: any, { desc }: any) => [desc(files.isFolder), desc(files.createdAt)],
       });
-
-      return {
-        ok: true,
-        files: files.map((f: any) => ({
-          id: f.id,
-          uid: f.uid,
-          filename: f.filename,
-          fileSize: f.fileSize,
-          isFolder: f.isFolder,
-          parentId: f.parentId,
-          createdAt: f.createdAt,
-          encryptedKey: f.encryptedKey,
-          iv: f.iv,
-        })),
-      };
+      return { ok: true, files: files.map(mapFile) };
     }
 
     const files = await db.query.files.findMany({
@@ -106,20 +119,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       orderBy: (files: any, { desc }: any) => [desc(files.isFolder), desc(files.createdAt)],
     });
 
-    return {
-      ok: true,
-      files: files.map((f: any) => ({
-        id: f.id,
-        uid: f.uid,
-        filename: f.filename,
-        fileSize: f.fileSize,
-        isFolder: f.isFolder,
-        parentId: f.parentId,
-        createdAt: f.createdAt,
-        encryptedKey: f.encryptedKey,
-        iv: f.iv,
-      })),
-    };
+    return { ok: true, files: files.map(mapFile) };
   });
   
   // ============ GET FILE/FOLDER BY UID (Authenticated) ============
@@ -208,10 +208,14 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     const iv = fields.iv?.value;
     const fileHash = fields.file_hash?.value;
     const parentId = fields.parent_id?.value || null;
+    const encryptedFilename = fields.encrypted_filename?.value;
     
     if (!encryptedKey || !iv) {
       return reply.status(400).send({ ok: false, msg: 'Missing encryption metadata' });
     }
+
+    // Use encrypted filename if provided (zero-knowledge), fall back to plaintext blob name
+    const storedFilename = encryptedFilename || data.filename;
 
     const { vtResult, mbResult } = await scanUploadBuffer(buffer, data.filename, fileHash);
 
@@ -263,7 +267,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     await db.insert(schema.files).values({
       id: fileId,
       uid: fileUid,
-      filename: data.filename,
+      filename: storedFilename,
       ownerId: user.id,
       encryptedKey,
       iv,
@@ -317,7 +321,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ ok: false, msg: 'Invalid request' });
     }
     
-    const { name, parentId } = body.data;
+    const { name, parentId, encryptedKey: folderKey, iv: folderIv } = body.data;
     
     const folderId = generateUUID();
     const folderUid = generateUID();
@@ -326,8 +330,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       uid: folderUid,
       filename: name,
       ownerId: user.id,
-      encryptedKey: '', // Folders don't have encrypted keys
-      iv: '',
+      encryptedKey: folderKey || '',
+      iv: folderIv || '',
       isFolder: true,
       parentId: parentId || null,
     });
@@ -379,7 +383,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     const stream = getStream(file.storagePath);
     
     reply.header('Content-Type', 'application/octet-stream');
-    reply.header('Content-Disposition', `attachment; filename="${file.filename}"`);
+    reply.header('Content-Disposition', safeContentDisposition(file.filename));
     reply.header('X-Encrypted-Key', encryptedKey);
     reply.header('X-IV', file.iv);
     
@@ -535,6 +539,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         isFolder: f.isFolder,
         parentId: f.parentId,
         deletedAt: f.deletedAt,
+        encryptedKey: f.encryptedKey,
+        iv: f.iv,
       })),
     };
   });
@@ -714,6 +720,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         id: f.id,
         filename: f.filename,
         parentId: f.parentId,
+        encryptedKey: f.encryptedKey,
+        iv: f.iv,
       })),
     };
   });

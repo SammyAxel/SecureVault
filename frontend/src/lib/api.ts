@@ -34,15 +34,20 @@ async function request<T>(
     headers,
   });
   
-  // Handle empty responses
   const text = await response.text();
-  const data = text ? JSON.parse(text) : {};
-  
-  if (!response.ok) {
-    throw new ApiError(response.status, data.msg || 'Request failed', data);
+  let data: unknown = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new ApiError(response.status, 'Invalid response from server');
   }
-  
-  return data;
+
+  if (!response.ok) {
+    const obj = data as { msg?: string; quotaExceeded?: boolean };
+    throw new ApiError(response.status, obj.msg || 'Request failed', obj);
+  }
+
+  return data as T;
 }
 
 /** JSON GET/POST without Authorization (public share links, etc.). */
@@ -371,12 +376,13 @@ export interface FileItem {
   iv: string;
 }
 
-/** List folder contents, or when `nameSearch` is set, all owned files matching the name (any folder depth). */
-export async function listFiles(parentId?: string | null, nameSearch?: string) {
+/** List folder contents. Pass `all=true` to return every file (for client-side search). */
+export async function listFiles(parentId?: string | null, nameSearch?: string, all?: boolean) {
   const params = new URLSearchParams();
   if (parentId) params.set('parentId', parentId);
   const q = nameSearch?.trim();
   if (q) params.set('q', q);
+  if (all) params.set('all', 'true');
   const qs = params.toString();
   return request<{ ok: boolean; files: FileItem[] }>(qs ? `/files?${qs}` : '/files');
 }
@@ -395,7 +401,8 @@ export async function uploadFile(
   encryptedKey: string,
   iv: string,
   fileHash: string,
-  parentId?: string
+  parentId?: string,
+  encryptedFilename?: string
 ) {
   const formData = new FormData();
   formData.append('file', new Blob([encryptedData]), file.name);
@@ -405,6 +412,9 @@ export async function uploadFile(
   if (parentId) {
     formData.append('parent_id', parentId);
   }
+  if (encryptedFilename) {
+    formData.append('encrypted_filename', encryptedFilename);
+  }
   
   return request<{ ok: boolean; fileId: string }>('/upload', {
     method: 'POST',
@@ -412,10 +422,15 @@ export async function uploadFile(
   });
 }
 
-export async function createFolder(name: string, parentId?: string) {
+export async function createFolder(
+  name: string,
+  parentId?: string,
+  encryptedKey?: string,
+  iv?: string
+) {
   return request<{ ok: boolean; folderId: string }>('/folders', {
     method: 'POST',
-    body: JSON.stringify({ name, parentId }),
+    body: JSON.stringify({ name, parentId, encryptedKey, iv }),
   });
 }
 
@@ -565,6 +580,8 @@ export async function getAllFolders() {
       id: string;
       filename: string;
       parentId: string | null;
+      encryptedKey?: string;
+      iv?: string;
     }>;
   }>('/folders');
 }

@@ -1,4 +1,4 @@
-import { Show, type JSX } from 'solid-js';
+import { Show, onCleanup, type JSX } from 'solid-js';
 
 interface KeyboardShortcutsModalProps {
   open: boolean;
@@ -27,8 +27,43 @@ export default function KeyboardShortcutsModal(props: KeyboardShortcutsModalProp
     typeof navigator !== 'undefined' &&
     (navigator.platform.includes('Mac') || navigator.userAgent.includes('Mac'));
 
+  let panelRef: HTMLDivElement | undefined;
+  let previousActiveElement: Element | null = null;
+
+  function trapFocus(e: KeyboardEvent) {
+    if (e.key !== 'Tab' || !panelRef) return;
+    const focusable = panelRef.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+    } else {
+      if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  }
+
   return (
     <Show when={props.open}>
+      {(() => {
+        previousActiveElement = document.activeElement;
+        queueMicrotask(() => {
+          const btn = panelRef?.querySelector<HTMLElement>('button');
+          btn?.focus();
+        });
+        const handleKeyDown = (e: KeyboardEvent) => {
+          trapFocus(e);
+          if (e.key === 'Escape') props.onClose();
+        };
+        document.addEventListener('keydown', handleKeyDown);
+        onCleanup(() => {
+          document.removeEventListener('keydown', handleKeyDown);
+          if (previousActiveElement instanceof HTMLElement) previousActiveElement.focus();
+        });
+        return null;
+      })()}
       <div
         class="fixed inset-0 bg-black/80 z-[80] flex items-center justify-center p-4 sv-modal-overlay"
         role="dialog"
@@ -37,6 +72,7 @@ export default function KeyboardShortcutsModal(props: KeyboardShortcutsModalProp
         onClick={props.onClose}
       >
         <div
+          ref={panelRef}
           class="bg-gray-800 rounded-xl max-w-md w-full overflow-hidden shadow-vault-float sv-modal-panel border border-gray-700"
           onClick={(e) => e.stopPropagation()}
         >

@@ -11,6 +11,8 @@ import {
   decryptFile,
   unwrapKey,
   base64ToUint8Array,
+  isEncryptedFilename,
+  decryptFilename,
 } from '../lib/crypto';
 import { ROUTES, hrefWithCurrentSearch } from '../lib/routes';
 import { getFileExtension } from '../lib/files';
@@ -66,16 +68,53 @@ export default function FileViewer(props: FileViewerProps) {
         return;
       }
       
-      setFile(result.file);
-      setParentPath(result.parentPath || []);
+      // Decrypt encrypted filename and parent path names
+      let fileData = result.file;
+      let pathData = result.parentPath || [];
+      const keys = getCurrentKeys();
+      if (keys) {
+        try {
+          const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
+          if (isEncryptedFilename(fileData.filename) && fileData.encryptedKey) {
+            const fk = await unwrapKey(fileData.encryptedKey, privateKey);
+            fileData = { ...fileData, filename: await decryptFilename(fileData.filename, fk) };
+          }
+          pathData = await Promise.all(
+            pathData.map(async (p: any) => {
+              if (!isEncryptedFilename(p.name) || !p.encryptedKey) return p;
+              try {
+                const fk = await unwrapKey(p.encryptedKey, privateKey);
+                return { ...p, name: await decryptFilename(p.name, fk) };
+              } catch { return p; }
+            })
+          );
+        } catch { /* ignore decryption errors */ }
+      }
+
+      setFile(fileData);
+      setParentPath(pathData);
       
-      if (result.file.isFolder) {
-        // Load folder contents
-        const contents = await api.listFiles(result.file.id);
-        setFolderContents(contents.files);
+      if (fileData.isFolder) {
+        const contents = await api.listFiles(fileData.id);
+        // Decrypt folder contents filenames
+        let decryptedFiles = contents.files;
+        if (keys) {
+          try {
+            const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
+            decryptedFiles = await Promise.all(
+              contents.files.map(async (f) => {
+                if (!isEncryptedFilename(f.filename) || !f.encryptedKey) return f;
+                try {
+                  const fk = await unwrapKey(f.encryptedKey, privateKey);
+                  return { ...f, filename: await decryptFilename(f.filename, fk) };
+                } catch { return f; }
+              })
+            );
+          } catch { /* ignore */ }
+        }
+        setFolderContents(decryptedFiles);
       } else {
-        // Load file preview
-        await loadPreview(result.file);
+        await loadPreview(fileData);
       }
     } catch (err: any) {
       if (err.status === 403 || err.message?.includes('403') || err.message?.includes('Access denied')) {

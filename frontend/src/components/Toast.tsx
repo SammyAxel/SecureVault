@@ -62,6 +62,7 @@ function ToastItem(props: { toast: typeof toasts extends () => infer T ? T exten
       <button
         onClick={() => toast.dismiss(props.toast.id)}
         class="text-white/70 hover:text-white text-lg leading-none"
+        aria-label="Dismiss notification"
       >
         ×
       </button>

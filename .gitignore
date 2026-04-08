@@ -46,6 +46,9 @@ docker-compose.override.yml
 *.swp
 *.swo
 
+# Cursor (AI editor artifacts)
+.cursor/plans/
+
 # OS
 .DS_Store
 Thumbs.db
