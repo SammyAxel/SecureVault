@@ -1,6 +1,7 @@
-import { randomBytes, createHash, createVerify, timingSafeEqual, createCipheriv, createDecipheriv } from 'crypto';
+import { randomBytes, createHash, createVerify, createPublicKey, timingSafeEqual, createCipheriv, createDecipheriv } from 'crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { dirname, resolve } from 'path';
+import { libLogger } from './logger.js';
 
 export function generateToken(length: number = 32): string {
   return randomBytes(length).toString('hex');
@@ -45,13 +46,14 @@ export function verifyECDSASignature(
     const verifier = createVerify('SHA256');
     verifier.update(challenge);
     return verifier.verify(keyObject, signatureDer);
-  } catch {
+  } catch (err) {
+    libLogger.warn({ err, publicKeyLen: publicKeyBase64?.length, sigLen: signatureBase64?.length },
+      'ECDSA signature verification threw — treating as invalid');
     return false;
   }
 }
 
-function createPublicKeyFromSpki(spkiDer: Buffer): ReturnType<typeof import('crypto').createPublicKey> {
-  const { createPublicKey } = require('crypto') as typeof import('crypto');
+function createPublicKeyFromSpki(spkiDer: Buffer) {
   return createPublicKey({ key: spkiDer, format: 'der', type: 'spki' });
 }
 
