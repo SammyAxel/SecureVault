@@ -760,8 +760,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       sessions: sessions.map((s) => ({
         id: s.id,
         deviceInfo: s.deviceInfo,
-        ipAddress: s.ipAddress,
-        userAgent: s.userAgent,
+        ipAddress: DEMO_MODE ? null : s.ipAddress,
+        userAgent: DEMO_MODE ? null : s.userAgent,
         createdAt: s.createdAt,
         lastActive: s.lastActive,
         isCurrent: s.token === currentTokenHash,

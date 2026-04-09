@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { and, count, eq } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
+import { DEMO_MODE } from '../lib/demo.js';
 
 export async function auditRoutes(app: FastifyInstance): Promise<void> {
   // ============ GET MY AUDIT LOGS (Activity timeline) ============
@@ -40,8 +41,8 @@ export async function auditRoutes(app: FastifyInstance): Promise<void> {
         resourceType: log.resourceType,
         resourceId: log.resourceId,
         details: log.details ? JSON.parse(log.details) : null,
-        ipAddress: log.ipAddress,
-        userAgent: log.userAgent,
+        ipAddress: DEMO_MODE ? null : log.ipAddress,
+        userAgent: DEMO_MODE ? null : log.userAgent,
         createdAt: log.createdAt,
       })),
       pagination: {

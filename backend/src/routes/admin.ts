@@ -454,8 +454,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         resourceType: log.resourceType,
         resourceId: log.resourceId,
         details: log.details ? JSON.parse(log.details) : null,
-        ipAddress: log.ipAddress,
-        userAgent: log.userAgent,
+        ipAddress: DEMO_MODE ? null : log.ipAddress,
+        userAgent: DEMO_MODE ? null : log.userAgent,
         createdAt: log.createdAt,
       })),
       pagination: {
@@ -492,8 +492,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       sessions: sessions.map((s: any) => ({
         id: s.id,
         deviceInfo: s.deviceInfo,
-        ipAddress: s.ipAddress,
-        userAgent: s.userAgent,
+        ipAddress: DEMO_MODE ? null : s.ipAddress,
+        userAgent: DEMO_MODE ? null : s.userAgent,
         createdAt: s.createdAt,
         lastActive: s.lastActive,
         expiresAt: s.expiresAt,

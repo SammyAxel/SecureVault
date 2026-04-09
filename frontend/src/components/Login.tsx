@@ -1,6 +1,7 @@
 import { createSignal, Show, createEffect } from 'solid-js';
 import { useAuth } from '../stores/auth';
 import * as api from '../lib/api';
+import { ApiError } from '../lib/api';
 import {
   setCurrentKeys,
   importSigningPrivateKey,
@@ -123,7 +124,20 @@ export default function Login(props: LoginProps) {
         totpEnabled: requires2FA(),
       });
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      const msg = err instanceof Error ? err.message : 'Login failed';
+      setError(msg);
+
+      // If the challenge is no longer usable or creds are wrong, unlock the form so user can try again.
+      if (err instanceof ApiError) {
+        if (err.status === 401 || err.status === 400) {
+          if (msg === 'Invalid credentials' || msg === 'Challenge expired or invalid') {
+            setChallengeData(null);
+            setRequires2FA(false);
+            setTotp('');
+            setTrustDevice(false);
+          }
+        }
+      }
     } finally {
       await awaitMinElapsed(opStart, MIN_FORM_SUBMIT_MS);
       setIsLoading(false);
