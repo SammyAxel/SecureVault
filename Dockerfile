@@ -4,25 +4,27 @@
 # ============================================
 
 # Build stage - Backend
-FROM node:20-alpine AS backend-builder
+FROM node:24-alpine AS backend-builder
 
 WORKDIR /app/backend
 COPY backend/package*.json ./
-RUN npm ci && npm cache clean --force
+# better-sqlite3: no prebuild for node24+musalpine; node-gyp needs a toolchain
+RUN apk add --no-cache python3 make g++ \
+  && npm install --ignore-scripts=false && npm cache clean --force
 COPY backend/ ./
 RUN npm run build
 
 # Build stage - Frontend  
-FROM node:20-alpine AS frontend-builder
+FROM node:24-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-RUN npm ci && npm cache clean --force
+RUN npm install --ignore-scripts=false && npm cache clean --force
 COPY frontend/ ./
 RUN npm run build
 
 # Production stage
-FROM node:20-alpine AS production
+FROM node:24-alpine AS production
 
 # Security: create non-root user
 RUN addgroup -g 1001 -S nodejs && \
@@ -34,8 +36,10 @@ WORKDIR /app
 COPY --from=backend-builder --chown=securevault:nodejs /app/backend/dist ./dist
 COPY --from=backend-builder --chown=securevault:nodejs /app/backend/package*.json ./
 
-# Install only production dependencies
-RUN npm ci --only=production && npm cache clean --force
+# Install only production dependencies (native compile for better-sqlite3)
+RUN apk add --no-cache --virtual .native-build python3 make g++ \
+  && npm install --omit=dev && npm cache clean --force \
+  && apk del .native-build
 
 # Copy frontend build
 COPY --from=frontend-builder --chown=securevault:nodejs /app/frontend/dist ./frontend/dist
