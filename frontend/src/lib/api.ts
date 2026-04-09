@@ -1,5 +1,10 @@
 const API_BASE = '/api';
 
+/** Trim whitespace; login/register match usernames exactly (SQLite is case-sensitive). */
+function normalizeUsername(username: string): string {
+  return username.trim();
+}
+
 class ApiError extends Error {
   constructor(
     public status: number,
@@ -109,7 +114,7 @@ export async function setupAdmin(
   return request<{ ok: boolean; userId: string; username: string; isAdmin: boolean }>('/setup/admin', {
     method: 'POST',
     body: JSON.stringify({
-      username,
+      username: normalizeUsername(username),
       publicKey,
       encryptionPublicKey,
       ...(virusTotalApiKey !== undefined && virusTotalApiKey !== '' && { virusTotalApiKey: virusTotalApiKey.trim() }),
@@ -126,7 +131,11 @@ export async function register(
 ) {
   return request<{ ok: boolean; userId: string; username: string }>('/register', {
     method: 'POST',
-    body: JSON.stringify({ username, publicKey, encryptionPublicKey }),
+    body: JSON.stringify({
+      username: normalizeUsername(username),
+      publicKey,
+      encryptionPublicKey,
+    }),
   });
 }
 
@@ -138,7 +147,7 @@ export async function getChallenge(username: string, deviceFingerprint?: string)
     requires2FA: boolean;
   }>('/auth/challenge', {
     method: 'POST',
-    body: JSON.stringify({ username, deviceFingerprint }),
+    body: JSON.stringify({ username: normalizeUsername(username), deviceFingerprint }),
   });
 }
 
@@ -168,7 +177,7 @@ export async function verifyLogin(
   }>('/auth/verify', {
     method: 'POST',
     body: JSON.stringify({ 
-      username, 
+      username: normalizeUsername(username), 
       challengeId, 
       signature, 
       totp, 
