@@ -47,6 +47,7 @@ import {
 import { awaitMinElapsed, MIN_SETUP_WIZARD_MS, MIN_SEARCH_FEEDBACK_MS } from './lib/motion';
 import { logger } from './lib/logger';
 import { useRoute } from './lib/useRoute';
+import { isSubtleCryptoAvailable, insecureWebCryptoMessage } from './lib/webCryptoSupport';
 
 function LazyRouteFallback() {
   return (
@@ -313,6 +314,14 @@ function AppContent() {
 
   return (
     <>
+      <Show when={typeof window !== 'undefined' && !isSubtleCryptoAvailable()}>
+        <div
+          role="alert"
+          class="bg-amber-900/90 border-b border-amber-700 text-amber-100 px-4 py-3 text-sm text-center leading-relaxed"
+        >
+          {insecureWebCryptoMessage()}
+        </div>
+      </Show>
       {/* Loading state */}
       <Show when={checkingSetup()}>
         <div class="min-h-screen bg-gray-900 flex items-center justify-center">

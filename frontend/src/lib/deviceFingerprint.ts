@@ -1,5 +1,6 @@
 // Device fingerprinting for trusted device feature
 import { UAParser } from 'ua-parser-js';
+import { assertSubtleCrypto } from './webCryptoSupport';
 
 export interface DeviceInfo {
   fingerprint: string;
@@ -10,6 +11,7 @@ export interface DeviceInfo {
 
 // Generate a semi-unique device fingerprint
 export async function generateDeviceFingerprint(): Promise<string> {
+  assertSubtleCrypto();
   const components: string[] = [];
   
   // User agent
