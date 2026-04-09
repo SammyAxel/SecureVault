@@ -8,7 +8,9 @@ FROM node:24-alpine AS backend-builder
 
 WORKDIR /app/backend
 COPY backend/package*.json ./
-RUN npm install --ignore-scripts=false && npm cache clean --force
+# better-sqlite3: no prebuild for node24+musalpine; node-gyp needs a toolchain
+RUN apk add --no-cache python3 make g++ \
+  && npm install --ignore-scripts=false && npm cache clean --force
 COPY backend/ ./
 RUN npm run build
 
@@ -34,8 +36,10 @@ WORKDIR /app
 COPY --from=backend-builder --chown=securevault:nodejs /app/backend/dist ./dist
 COPY --from=backend-builder --chown=securevault:nodejs /app/backend/package*.json ./
 
-# Install only production dependencies
-RUN npm install --omit=dev && npm cache clean --force
+# Install only production dependencies (native compile for better-sqlite3)
+RUN apk add --no-cache --virtual .native-build python3 make g++ \
+  && npm install --omit=dev && npm cache clean --force \
+  && apk del .native-build
 
 # Copy frontend build
 COPY --from=frontend-builder --chown=securevault:nodejs /app/frontend/dist ./frontend/dist
