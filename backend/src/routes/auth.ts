@@ -329,12 +329,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     });
 
     if (!user) {
+      request.log.warn({ username }, 'Login verify: user not found');
       return reply.status(401).send({ ok: false, msg: 'Invalid credentials' });
     }
 
     // Server-side ECDSA signature verification
     const isValidSig = verifyECDSASignature(user.publicKeyPem, challengeData.challenge, signature);
     if (!isValidSig) {
+      request.log.warn({ username, userId: user.id, challengeLen: challengeData.challenge.length, sigLen: signature.length, pubKeyLen: user.publicKeyPem.length },
+        'Login verify: ECDSA signature mismatch');
       return reply.status(401).send({ ok: false, msg: 'Invalid credentials' });
     }
 
@@ -513,6 +516,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     // Server-side ECDSA signature verification
     const isValidSig = verifyECDSASignature(user.publicKeyPem, challengeData.challenge, signature);
     if (!isValidSig) {
+      request.log.warn({ username: user.username, userId: user.id },
+        'Device-link verify: ECDSA signature mismatch');
       return reply.status(401).send({ ok: false, msg: 'Invalid credentials' });
     }
 
