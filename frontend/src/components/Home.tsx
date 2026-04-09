@@ -4,6 +4,13 @@ import type { FileItem } from '../lib/api';
 import { formatSize } from '../lib/format';
 import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../lib/motion';
 import { formatAbsolute, formatRelative } from '../lib/time';
+import {
+  decryptFilename,
+  getCurrentKeys,
+  importEncryptionPrivateKey,
+  isEncryptedFilename,
+  unwrapKey,
+} from '../lib/crypto';
 
 export default function Home(props: {
   search: string;
@@ -18,6 +25,34 @@ export default function Home(props: {
   const [loadError, setLoadError] = createSignal<string | null>(null);
   const [loadNonce, setLoadNonce] = createSignal(0);
 
+  const decryptFileNames = async (items: FileItem[]): Promise<FileItem[]> => {
+    const keys = getCurrentKeys();
+    if (!keys) return items;
+
+    const hasEncrypted = items.some((f) => isEncryptedFilename(f.filename));
+    if (!hasEncrypted) return items;
+
+    let privateKey: CryptoKey;
+    try {
+      privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
+    } catch {
+      return items;
+    }
+
+    return Promise.all(
+      items.map(async (f) => {
+        if (!isEncryptedFilename(f.filename) || !f.encryptedKey) return f;
+        try {
+          const fileKey = await unwrapKey(f.encryptedKey, privateKey);
+          const name = await decryptFilename(f.filename, fileKey);
+          return { ...f, filename: name };
+        } catch {
+          return f;
+        }
+      })
+    );
+  };
+
   createEffect(() => {
     loadNonce();
     (async () => {
@@ -26,7 +61,7 @@ export default function Home(props: {
       setIsLoading(true);
       try {
         const res = await api.listFiles();
-        setFiles(res.files);
+        setFiles(await decryptFileNames(res.files));
       } catch (e: unknown) {
         setLoadError(e instanceof Error ? e.message : 'Something went wrong while loading Home.');
       } finally {
