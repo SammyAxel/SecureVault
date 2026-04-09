@@ -248,7 +248,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       { firstSetup: true },
       getClientIp(request),
       request.headers['user-agent'],
-      request.session?.id
+      null
     );
 
     return { ok: true, userId: user.id, username: user.username, isAdmin: true };
@@ -417,7 +417,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       { method: totp ? '2FA' : 'ECDSA' },
       getClientIp(request),
       request.headers['user-agent'],
-      request.session?.id
+      (request as AuthenticatedRequest).session?.id
     );
 
     return {
@@ -610,7 +610,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       { method: 'DEVICE_LINK_QR' },
       getClientIp(request),
       request.headers['user-agent'],
-      request.session?.id
+      (request as AuthenticatedRequest).session?.id
     );
 
     return {
