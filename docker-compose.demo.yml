@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile.demo
     container_name: securevault-demo
     ports:
-      - "3000:3000"
+      - "3001:3000"
     volumes:
       - securevault-demo-data:/app/data
       - securevault-demo-uploads:/app/uploads

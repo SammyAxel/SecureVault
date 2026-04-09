@@ -92,7 +92,8 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       fileId,
       { filename: file.filename, recipientUsername },
       getClientIp(request),
-      request.headers['user-agent']
+      request.headers['user-agent'],
+      request.session?.id
     );
     
     // Create notification for recipient
@@ -242,7 +243,8 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       fileId,
       { filename: file.filename, expiresInHours, maxAccess, isFolder: file.isFolder },
       getClientIp(request),
-      request.headers['user-agent']
+      request.headers['user-agent'],
+      request.session?.id
     );
     
     return {

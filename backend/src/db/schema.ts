@@ -83,6 +83,7 @@ export const auditLogs = sqliteTable('audit_logs', {
   details: text('details'), // JSON string with additional details
   ipAddress: text('ip_address'),
   userAgent: text('user_agent'),
+  demoSessionId: integer('demo_session_id'),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 

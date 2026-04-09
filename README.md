@@ -235,7 +235,7 @@ The `demo` branch ships a public demo profile: a pre-seeded admin account whose 
 docker compose -f docker-compose.demo.yml up --build
 ```
 
-App: http://localhost:3000 — on the login screen use **Download demo admin keys**, then sign in with username `demo_admin` and that file. After login, use **Tour** in the header for the guided walkthrough.
+App: http://localhost:3001 — on the login screen use **Download demo admin keys**, then sign in with username `demo_admin` and that file. After login, use **Tour** in the header for the guided walkthrough.
 
 ### Local development (demo)
 

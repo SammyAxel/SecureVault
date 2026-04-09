@@ -124,6 +124,7 @@ function createSeededDb(keys: { signingPublicKey: string; encryptionPublicKey: s
       details TEXT,
       ip_address TEXT,
       user_agent TEXT,
+      demo_session_id INTEGER,
       created_at INTEGER DEFAULT (unixepoch())
     );
 
@@ -167,6 +168,7 @@ function createSeededDb(keys: { signingPublicKey: string; encryptionPublicKey: s
     CREATE INDEX IF NOT EXISTS idx_public_shares_token ON public_shares(token);
     CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
     CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_demo_session ON audit_logs(demo_session_id);
     CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
     CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
     CREATE INDEX IF NOT EXISTS idx_trusted_devices_user ON trusted_devices(user_id);

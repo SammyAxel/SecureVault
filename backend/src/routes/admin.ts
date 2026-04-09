@@ -17,7 +17,7 @@ import {
 } from '../lib/malwarebazaar.js';
 import { getStats } from '../lib/storage.js';
 import { getClientIp } from '../lib/clientIp.js';
-import { DEMO_MODE } from '../lib/demo.js';
+import { DEMO_MODE, DEMO_USERNAME } from '../lib/demo.js';
 import { libLogger } from '../lib/logger.js';
 import { z } from 'zod';
 
@@ -41,7 +41,8 @@ export async function logAudit(
   resourceId?: string,
   details?: Record<string, any>,
   ipAddress?: string,
-  userAgent?: string
+  userAgent?: string,
+  demoSessionId?: number | null
 ) {
   try {
     await db.insert(schema.auditLogs).values({
@@ -53,6 +54,7 @@ export async function logAudit(
       details: details ? JSON.stringify(details) : null,
       ipAddress,
       userAgent,
+      demoSessionId: DEMO_MODE && username === DEMO_USERNAME ? (demoSessionId ?? null) : null,
     });
   } catch (error) {
     libLogger.error({ err: error }, 'Failed to log audit');
@@ -349,7 +351,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       userId,
       { targetUsername: user.username },
       getClientIp(request),
-      request.headers['user-agent']
+      request.headers['user-agent'],
+      request.session?.id
     );
     
     return { ok: true, suspended };
@@ -402,7 +405,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       userId,
       { targetUsername: user.username, oldQuota: user.storageQuota, newQuota: quota },
       getClientIp(request),
-      request.headers['user-agent']
+      request.headers['user-agent'],
+      request.session?.id
     );
     
     return { ok: true, quota };
@@ -531,7 +535,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       sessionId,
       { targetUserId: session.userId },
       getClientIp(request),
-      request.headers['user-agent']
+      request.headers['user-agent'],
+      request.session?.id
     );
     
     return { ok: true };

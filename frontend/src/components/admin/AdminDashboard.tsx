@@ -320,16 +320,10 @@ export default function AdminDashboard() {
       loadStats();
     } else if (tab === 'users') {
       loadUsers(1);
-    } else if (tab === 'audit' && !isDemo()) {
+    } else if (tab === 'audit') {
       loadAuditLogs(1);
     } else if (tab === 'settings') {
       loadAdminSettings();
-    }
-  });
-
-  createEffect(() => {
-    if (isDemo() && activeTab() === 'audit') {
-      setActiveTab('overview');
     }
   });
 
@@ -379,18 +373,16 @@ export default function AdminDashboard() {
         >
           User Management
         </button>
-        <Show when={!isDemo()}>
-          <button
-            onClick={() => switchTab('audit')}
-            class={`px-4 py-3 text-sm font-medium border-b-2 transition-all duration-200 ${
-              activeTab() === 'audit'
-                ? 'border-primary-500 text-primary-400'
-                : 'border-transparent text-gray-400 hover:text-white'
-            }`}
-          >
-            Audit Logs
-          </button>
-        </Show>
+        <button
+          onClick={() => switchTab('audit')}
+          class={`px-4 py-3 text-sm font-medium border-b-2 transition-all duration-200 ${
+            activeTab() === 'audit'
+              ? 'border-primary-500 text-primary-400'
+              : 'border-transparent text-gray-400 hover:text-white'
+          }`}
+        >
+          Audit Logs
+        </button>
         <button
           onClick={() => switchTab('settings')}
           class={`px-4 py-3 text-sm font-medium border-b-2 transition-all duration-200 ${
@@ -653,7 +645,7 @@ export default function AdminDashboard() {
       </Show>
 
       {/* Audit Logs Tab */}
-      <Show when={activeTab() === 'audit' && !isDemo()}>
+      <Show when={activeTab() === 'audit'}>
         <div class="bg-gray-800 rounded-xl overflow-hidden">
           <Show when={isLoading()}>
             <div class="flex items-center justify-center py-12">

@@ -239,8 +239,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       await setVirusTotalApiKey(virusTotalApiKey.trim() || null);
     }
 
-    await logAudit(user.id, user.username, 'SETUP_ADMIN', 'USER', user.id.toString(),
-      { firstSetup: true }, getClientIp(request), request.headers['user-agent']);
+    await logAudit(
+      user.id,
+      user.username,
+      'SETUP_ADMIN',
+      'USER',
+      user.id.toString(),
+      { firstSetup: true },
+      getClientIp(request),
+      request.headers['user-agent'],
+      request.session?.id
+    );
 
     return { ok: true, userId: user.id, username: user.username, isAdmin: true };
   });
@@ -399,8 +408,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       userAgent: request.headers['user-agent'],
     });
 
-    await logAudit(user.id, user.username, 'LOGIN', 'SESSION', undefined,
-      { method: totp ? '2FA' : 'ECDSA' }, getClientIp(request), request.headers['user-agent']);
+    await logAudit(
+      user.id,
+      user.username,
+      'LOGIN',
+      'SESSION',
+      undefined,
+      { method: totp ? '2FA' : 'ECDSA' },
+      getClientIp(request),
+      request.headers['user-agent'],
+      request.session?.id
+    );
 
     return {
       ok: true,
@@ -440,8 +458,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const linkUrl = `${origin}/login/link#p=${encodeURIComponent(pairingId)}&s=${encodeURIComponent(linkSecret)}`;
     const qrCodeDataUrl = await QRCode.toDataURL(linkUrl, { width: 256, margin: 2 });
 
-    await logAudit(user.id, user.username, 'DEVICE_LINK_CREATED', 'SESSION', pairingId,
-      undefined, getClientIp(request), request.headers['user-agent']);
+    await logAudit(
+      user.id,
+      user.username,
+      'DEVICE_LINK_CREATED',
+      'SESSION',
+      pairingId,
+      undefined,
+      getClientIp(request),
+      request.headers['user-agent'],
+      request.session?.id
+    );
 
     return {
       ok: true,
@@ -574,8 +601,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     await markDeviceLinkCompleted(pairingId);
 
-    await logAudit(user.id, user.username, 'LOGIN', 'SESSION', undefined,
-      { method: 'DEVICE_LINK_QR' }, getClientIp(request), request.headers['user-agent']);
+    await logAudit(
+      user.id,
+      user.username,
+      'LOGIN',
+      'SESSION',
+      undefined,
+      { method: 'DEVICE_LINK_QR' },
+      getClientIp(request),
+      request.headers['user-agent'],
+      request.session?.id
+    );
 
     return {
       ok: true,
@@ -627,8 +663,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     await db.delete(schema.sessions).where(eq(schema.sessions.token, tokenHash));
 
-    await logAudit(user.id, user.username, 'LOGOUT', 'SESSION', undefined,
-      undefined, getClientIp(request), request.headers['user-agent']);
+    await logAudit(
+      user.id,
+      user.username,
+      'LOGOUT',
+      'SESSION',
+      undefined,
+      undefined,
+      getClientIp(request),
+      request.headers['user-agent'],
+      request.session?.id
+    );
 
     return { ok: true };
   });
@@ -737,8 +782,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       await db.update(schema.users).set(updates).where(eq(schema.users.id, user.id));
     }
 
-    await logAudit(user.id, user.username, 'UPDATE_PROFILE', 'USER', user.id.toString(),
-      { fields: Object.keys(updates) }, getClientIp(request), request.headers['user-agent']);
+    await logAudit(
+      user.id,
+      user.username,
+      'UPDATE_PROFILE',
+      'USER',
+      user.id.toString(),
+      { fields: Object.keys(updates) },
+      getClientIp(request),
+      request.headers['user-agent'],
+      request.session?.id
+    );
 
     return { ok: true };
   });
@@ -787,8 +841,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     await db.delete(schema.sessions).where(eq(schema.sessions.id, parseInt(id)));
 
-    await logAudit(user.id, user.username, 'REVOKE_SESSION', 'SESSION', id,
-      undefined, getClientIp(request), request.headers['user-agent']);
+    await logAudit(
+      user.id,
+      user.username,
+      'REVOKE_SESSION',
+      'SESSION',
+      id,
+      undefined,
+      getClientIp(request),
+      request.headers['user-agent'],
+      request.session?.id
+    );
 
     return { ok: true };
   });
@@ -812,8 +875,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       userAgent: request.headers['user-agent'],
     });
 
-    await logAudit(user.id, user.username, 'REVOKE_ALL_SESSIONS', 'SESSION', undefined,
-      undefined, getClientIp(request), request.headers['user-agent']);
+    await logAudit(
+      user.id,
+      user.username,
+      'REVOKE_ALL_SESSIONS',
+      'SESSION',
+      undefined,
+      undefined,
+      getClientIp(request),
+      request.headers['user-agent'],
+      request.session?.id
+    );
 
     return { ok: true };
   });
@@ -830,8 +902,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ ok: false, msg: 'Please type your username to confirm' });
     }
 
-    await logAudit(user.id, user.username, 'DELETE_ACCOUNT', 'USER', user.id.toString(),
-      undefined, getClientIp(request), request.headers['user-agent']);
+    await logAudit(
+      user.id,
+      user.username,
+      'DELETE_ACCOUNT',
+      'USER',
+      user.id.toString(),
+      undefined,
+      getClientIp(request),
+      request.headers['user-agent'],
+      request.session?.id
+    );
 
     await db.delete(schema.users).where(eq(schema.users.id, user.id));
 

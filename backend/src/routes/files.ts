@@ -253,7 +253,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
           } : undefined,
         },
         getClientIp(request),
-        request.headers['user-agent']
+        request.headers['user-agent'],
+        request.session?.id
       );
 
       return reply.status(400).send({
@@ -327,7 +328,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         },
       },
       getClientIp(request),
-      request.headers['user-agent']
+      request.headers['user-agent'],
+      request.session?.id
     );
     
     return { ok: true, fileId, uid: fileUid };
@@ -459,7 +461,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         fileId,
         { filename: file.filename },
         getClientIp(request),
-        request.headers['user-agent']
+        request.headers['user-agent'],
+        request.session?.id
       );
       
       return { ok: true, trashed: true };
@@ -492,7 +495,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       fileId,
       { filename: file.filename, fileSize: totalSizeToReclaim },
       getClientIp(request),
-      request.headers['user-agent']
+      request.headers['user-agent'],
+      request.session?.id
     );
 
     return { ok: true, deleted: true };
@@ -535,7 +539,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       fileId,
       { filename: file.filename },
       getClientIp(request),
-      request.headers['user-agent']
+      request.headers['user-agent'],
+      request.session?.id
     );
     
     return { ok: true };
@@ -634,7 +639,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       user.id.toString(),
       { deletedCount: trashed.length, fileSize: totalSizeToReclaim },
       getClientIp(request),
-      request.headers['user-agent']
+      request.headers['user-agent'],
+      request.session?.id
     );
 
     return { ok: true, deletedCount: trashed.length };

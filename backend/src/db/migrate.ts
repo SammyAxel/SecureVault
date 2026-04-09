@@ -95,6 +95,7 @@ db.exec(`
     details TEXT,
     ip_address TEXT,
     user_agent TEXT,
+    demo_session_id INTEGER,
     created_at INTEGER DEFAULT (unixepoch())
   );
 
@@ -141,6 +142,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_public_shares_token ON public_shares(token);
   CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
   CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+  CREATE INDEX IF NOT EXISTS idx_audit_logs_demo_session ON audit_logs(demo_session_id);
   CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
   CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
   CREATE INDEX IF NOT EXISTS idx_trusted_devices_user ON trusted_devices(user_id);
@@ -226,6 +228,19 @@ if (!hasColumn('files', 'demo_session_id')) {
     libLogger.info('Migration successful: demo_session_id column added');
   } catch (error) {
     libLogger.error({ err: error }, 'Migration failed (demo_session_id)');
+    throw error;
+  }
+}
+
+// Migration 6: Add 'demo_session_id' column to audit_logs table (demo mode isolation)
+if (!hasColumn('audit_logs', 'demo_session_id')) {
+  libLogger.info('Running migration: Adding demo_session_id column to audit_logs table');
+  try {
+    db.exec('ALTER TABLE audit_logs ADD COLUMN demo_session_id INTEGER');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_audit_logs_demo_session ON audit_logs(demo_session_id)');
+    libLogger.info('Migration successful: audit_logs.demo_session_id column added');
+  } catch (error) {
+    libLogger.error({ err: error }, 'Migration failed (audit_logs.demo_session_id)');
     throw error;
   }
 }
