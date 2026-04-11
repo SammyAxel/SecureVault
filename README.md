@@ -237,6 +237,18 @@ docker compose -f docker-compose.demo.yml up --build
 
 App: http://localhost:3001 — on the login screen use **Download demo admin keys**, then sign in with username `demo_admin` and that file. After login, use **Tour** in the header for the guided walkthrough.
 
+### Troubleshooting
+
+**`git checkout demo` says it could be a local file and a branch** — the repo has a `demo/` directory, so Git can be ambiguous. Use:
+
+```bash
+git switch demo
+# or: git checkout --no-guess demo
+git pull origin demo
+```
+
+**Docker build fails on `npm ci` with “package.json and package-lock.json … not in sync”** — `npm ci` requires an exact, committed lockfile. Either run `npm install` in `frontend/` and `backend/` on your machine, commit the updated `package-lock.json` files, and pull again, or use the **`Dockerfile.demo` from this branch** (it uses `npm install`, which tolerates minor drift). If your `Dockerfile.demo` was changed locally (e.g. `npm ci` + Node 20), reset it with `git restore Dockerfile.demo` and rebuild.
+
 ### Local development (demo)
 
 From the repo root, this starts the API and Vite together with `DEMO_MODE` and the seeded database:
