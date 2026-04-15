@@ -273,6 +273,8 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
         result.push({
           id: item.id,
           filename: item.filename,
+          encryptedKey: item.encryptedKey,
+          iv: item.iv,
           isFolder: true,
           children,
         });

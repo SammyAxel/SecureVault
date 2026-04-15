@@ -1,6 +1,7 @@
 import { createSignal, Show } from 'solid-js';
 import * as api from '../lib/api';
 import type { FileItem } from '../lib/api';
+import { publicRequestJson } from '../lib/api';
 import {
   getCurrentKeys,
   importEncryptionPrivateKey,
@@ -24,6 +25,12 @@ export default function ShareModal(props: ShareModalProps) {
   const [shareLink, setShareLink] = createSignal<string | null>(null);
   const [error, setError] = createSignal('');
   const [copied, setCopied] = createSignal(false);
+
+  const base64UrlEncode = (json: unknown) => {
+    const str = JSON.stringify(json);
+    const b64 = btoa(unescape(encodeURIComponent(str)));
+    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  };
 
   const createShare = async () => {
     const opStart = Date.now();
@@ -60,9 +67,52 @@ export default function ShareModal(props: ShareModalProps) {
       const baseUrl = window.location.origin;
       
       if (props.file.isFolder) {
-        // For folders, we don't include encryption keys in the URL
-        // Each file in the folder has its own key that will be included when downloading
-        setShareLink(`${baseUrl}/share/${result.token}`);
+        // Folder shares need per-item keys in the URL fragment so the public page can decrypt filenames + file contents.
+        // Bundle format: #bundle=<base64url(JSON)>
+        const keys = getCurrentKeys();
+        if (!keys) {
+          throw new Error('Please login again - keys not found');
+        }
+
+        const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
+
+        type FolderItem = {
+          id: string;
+          filename: string;
+          isFolder: boolean;
+          encryptedKey?: string;
+          iv?: string;
+          children?: FolderItem[];
+        };
+
+        const meta = await publicRequestJson<{
+          ok: boolean;
+          isFolder?: boolean;
+          folder?: { id: string; filename?: string; children?: FolderItem[] };
+        }>(`/public/${result.token}`);
+
+        const items = meta.folder?.children ?? [];
+        const bundle: { v: 1; keys: Record<string, { k: string; iv?: string }> } = { v: 1, keys: {} };
+
+        const walk = async (list: FolderItem[]) => {
+          for (const it of list) {
+            if (it.encryptedKey) {
+              try {
+                const fileKey = await unwrapKey(it.encryptedKey, privateKey);
+                const rawKey = await crypto.subtle.exportKey('raw', fileKey);
+                bundle.keys[it.id] = { k: arrayBufferToBase64(rawKey), iv: it.iv || undefined };
+              } catch {
+                // ignore; leave missing and the public page will show encrypted name
+              }
+            }
+            if (it.children?.length) await walk(it.children);
+          }
+        };
+
+        await walk(items);
+
+        const bundleEnc = base64UrlEncode(bundle);
+        setShareLink(`${baseUrl}/share/${result.token}#bundle=${bundleEnc}`);
       } else {
         // For files, include the decryption key in the URL fragment
         const keys = getCurrentKeys();

@@ -80,12 +80,23 @@ export default function PublicShare() {
   // Extract key and IV from URL fragment (format: #key:iv)
   const parseFragment = () => {
     const hash = window.location.hash.slice(1); // Remove #
-    if (hash) {
-      const parts = hash.split(':');
-      if (parts.length === 2) {
-        return { key: parts[0], iv: parts[1] };
+    if (!hash) return null;
+    if (hash.startsWith('bundle=')) {
+      const enc = hash.slice('bundle='.length);
+      try {
+        const padded = enc.replace(/-/g, '+').replace(/_/g, '/');
+        const json = decodeURIComponent(escape(atob(padded)));
+        const parsed = JSON.parse(json) as { v: number; keys: Record<string, { k: string; iv?: string }> };
+        if (parsed && parsed.v === 1 && parsed.keys && typeof parsed.keys === 'object') {
+          return { bundle: parsed.keys } as const;
+        }
+      } catch {
+        return null;
       }
+      return null;
     }
+    const parts = hash.split(':');
+    if (parts.length === 2) return { key: parts[0], iv: parts[1] };
     return null;
   };
   
@@ -126,11 +137,16 @@ export default function PublicShare() {
   createEffect(() => {
     void (async () => {
       const t0 = Date.now();
-      // Parse the fragment for decryption key
+      // Parse the fragment for decryption key (single file) or bundle (folder share)
       const fragment = parseFragment();
       if (fragment) {
-        setDecryptionKey(fragment.key);
-        setDecryptionIv(fragment.iv);
+        if ('key' in fragment) {
+          setDecryptionKey(fragment.key);
+          setDecryptionIv(fragment.iv);
+        } else {
+          setDecryptionKey(null);
+          setDecryptionIv(null);
+        }
       }
 
       if (!token) {
@@ -155,11 +171,20 @@ export default function PublicShare() {
           if (!folderData) {
             setError('Invalid share data');
           } else {
-            // Decrypt encrypted filenames in the folder tree using each file's own key
+            // Decrypt encrypted filenames in the folder tree using the per-item key bundle (when present).
             const decryptFolderItems = async (items: FolderItem[]): Promise<FolderItem[]> => {
               return Promise.all(items.map(async (item) => {
                 let decryptedName = item.filename;
-                if (isEncryptedFilename(item.filename) && item.encryptedKey && fragment) {
+                if (isEncryptedFilename(item.filename) && fragment && 'bundle' in fragment) {
+                  const entry = fragment.bundle[item.id];
+                  if (entry?.k) {
+                    try {
+                      const itemKey = await importFileKey(entry.k);
+                      decryptedName = await decryptEncryptedFilename(item.filename, itemKey);
+                    } catch { /* keep raw */ }
+                  }
+                } else if (isEncryptedFilename(item.filename) && fragment && 'key' in fragment) {
+                  // Back-compat: treat as single-key share
                   try {
                     const itemKey = await importFileKey(fragment.key);
                     decryptedName = await decryptEncryptedFilename(item.filename, itemKey);
@@ -303,7 +328,24 @@ export default function PublicShare() {
 
     try {
       const response = await publicRequestRaw(`/public/${token}/file/${item.id}/download`);
-      const blob = await response.blob();
+      const encryptedData = await response.arrayBuffer();
+
+      // If a bundle key is present, decrypt the file content in-browser; otherwise download encrypted bytes.
+      const fragment = parseFragment();
+      let blob: Blob;
+      if (fragment && 'bundle' in fragment) {
+        const entry = fragment.bundle[item.id];
+        if (entry?.k && (entry.iv || item.iv)) {
+          const cryptoKey = await importFileKey(entry.k);
+          const ivBytes = new Uint8Array(base64ToArrayBuffer(entry.iv || item.iv!));
+          const decrypted = await decryptSharedFile(encryptedData, cryptoKey, ivBytes);
+          blob = new Blob([decrypted], { type: 'application/octet-stream' });
+        } else {
+          blob = new Blob([encryptedData], { type: 'application/octet-stream' });
+        }
+      } else {
+        blob = new Blob([encryptedData], { type: 'application/octet-stream' });
+      }
 
       if (prefersExplicitSaveStep()) {
         setPendingBlobSave({ blob, filename: item.filename });
