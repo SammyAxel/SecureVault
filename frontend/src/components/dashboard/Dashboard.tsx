@@ -776,43 +776,6 @@ export default function Dashboard(props: DashboardProps) {
     else window.history.replaceState({}, '', href);
   };
 
-  // Copy UID link to clipboard
-  const copyUIDLink = async (file: FileItem) => {
-    if (!file.uid) {
-      toast.error('UID not available for this file');
-      return;
-    }
-
-    const keys = getCurrentKeys();
-    if (!keys) {
-      toast.error('Please login again - keys not found');
-      return;
-    }
-
-    try {
-      // Download to get encryption info
-      const { encryptedKey, iv } = await api.downloadFile(file.id);
-
-      // Unwrap key
-      const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
-      const fileKey = await unwrapKey(encryptedKey, privateKey);
-
-      // Export raw key to base64
-      const rawKey = await crypto.subtle.exportKey('raw', fileKey);
-      const keyBase64 = arrayBufferToBase64(rawKey);
-
-      // Build URL with key and IV in fragment
-      const baseUrl = window.location.origin;
-      const url = `${baseUrl}/f/${file.uid}#${keyBase64}:${iv}`;
-
-      await navigator.clipboard.writeText(url);
-      toast.success('Link copied to clipboard!');
-    } catch (error: any) {
-      logger.error('Failed to copy UID link:', error);
-      toast.error(`Failed to copy link: ${error.message}`);
-    }
-  };
-
   // Handle delete
   const handleDelete = async (file: FileItem) => {
     const confirmed = await openConfirm({
@@ -1915,17 +1878,7 @@ export default function Dashboard(props: DashboardProps) {
                   </svg>
                   Share
                 </button>
-                {!file.isFolder && file.uid && (
-                  <button
-                    onClick={() => { copyUIDLink(file); closeActionMenu(); }}
-                    class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
-                  >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                    </svg>
-                    Copy Direct Link
-                  </button>
-                )}
+                {/* "Copy Direct Link" removed (share links should be created via Share). */}
               </Show>
               {section() !== 'trash' && !file.isFolder && (
                 <button

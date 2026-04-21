@@ -107,9 +107,10 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  /* Respect reduced motion, but keep critical feedback animations (spinners) alive. */
+  *:not(.animate-spin):not(.sv-allow-motion),
+  *:not(.animate-spin):not(.sv-allow-motion)::before,
+  *:not(.animate-spin):not(.sv-allow-motion)::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

@@ -23,7 +23,10 @@ export function blobFromBlobUrlFetchResponse(fetched: Blob, mimeType: string): B
  * Tries Web Share API with a File (good on Android / many mobile Chrome), then <a download>.
  */
 export async function saveBlobToDevice(blob: Blob, filename: string): Promise<void> {
-  if (typeof navigator !== 'undefined' && navigator.share && navigator.canShare) {
+  // Desktop Windows Chrome/Edge often supports Web Share but shows the OS share sheet,
+  // which is surprising when the user clicked "Download". Prefer Web Share only in
+  // mobile/touch contexts where it helps users save to Files apps.
+  if (prefersExplicitSaveStep() && typeof navigator !== 'undefined' && navigator.share && navigator.canShare) {
     try {
       const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
       const data: ShareData = { files: [file], title: filename };
