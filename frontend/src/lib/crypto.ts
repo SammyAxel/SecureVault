@@ -211,6 +211,64 @@ export async function unwrapKey(wrappedKey: string, privateKey: CryptoKey): Prom
   );
 }
 
+// ============ PASSPHRASE PUBLIC SHARE (PBKDF2 -> AES-GCM) ============
+
+export type PublicShareKdfParams = {
+  iterations: number;
+  hash: 'SHA-256';
+};
+
+export async function derivePublicShareKeyPBKDF2(
+  passphrase: string,
+  saltB64: string,
+  params: PublicShareKdfParams
+): Promise<CryptoKey> {
+  assertSubtleCrypto();
+  const salt = base64ToUint8Array(saltB64);
+  const baseKey = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(passphrase),
+    'PBKDF2',
+    false,
+    ['deriveKey']
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: salt as unknown as BufferSource, iterations: params.iterations, hash: params.hash },
+    baseKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+export function generatePublicShareSaltB64(bytes: number = 16): string {
+  const salt = crypto.getRandomValues(new Uint8Array(bytes));
+  return arrayBufferToBase64(salt);
+}
+
+export async function wrapFileKeyForPublicShare(
+  fileKey: CryptoKey,
+  shareKey: CryptoKey
+): Promise<{ wrappedKey: string; wrappedKeyIv: string }> {
+  assertSubtleCrypto();
+  const raw = await crypto.subtle.exportKey('raw', fileKey);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, shareKey, raw);
+  return { wrappedKey: arrayBufferToBase64(ct), wrappedKeyIv: arrayBufferToBase64(iv) };
+}
+
+export async function unwrapFileKeyFromPublicShare(
+  wrappedKeyB64: string,
+  wrappedKeyIvB64: string,
+  shareKey: CryptoKey
+): Promise<CryptoKey> {
+  assertSubtleCrypto();
+  const ct = base64ToArrayBuffer(wrappedKeyB64);
+  const iv = base64ToUint8Array(wrappedKeyIvB64);
+  const raw = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv as unknown as BufferSource }, shareKey, ct);
+  return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+
 // ============ UTILITIES ============
 
 export function arrayBufferToBase64(data: ArrayBuffer | ArrayBufferView): string {
@@ -356,7 +414,8 @@ export async function loadKeyBundleFromFile(file: File): Promise<KeyBundle> {
   return bundle as KeyBundle;
 }
 
-// Store keys in memory and localStorage (shared across tabs)
+// Private key material: kept in memory and localStorage for multi-tab use. Any XSS in this origin
+// can read localStorage; keep dependencies trusted and avoid injecting third-party script.
 const KEYS_STORAGE_KEY = 'securevault_keys';
 let currentKeys: KeyBundle | null = null;
 

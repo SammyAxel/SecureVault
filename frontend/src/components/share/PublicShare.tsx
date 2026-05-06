@@ -1,4 +1,4 @@
-import { createSignal, createEffect, Show, For, onMount, createMemo } from 'solid-js';
+import { createSignal, createEffect, Show, For, createMemo } from 'solid-js';
 import { formatSize } from '../../lib/format';
 import { ROUTES } from '../../lib/routes';
 import { publicRequestJson, publicRequestRaw, ApiError } from '../../lib/api';
@@ -11,10 +11,11 @@ import BlobSavePrompt from '../BlobSavePrompt';
 import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile } from '../FilePreview';
 import {
   base64ToArrayBuffer,
-  importFileKey,
   decryptSharedFile,
   isEncryptedFilename,
   decryptEncryptedFilename,
+  derivePublicShareKeyPBKDF2,
+  unwrapFileKeyFromPublicShare,
 } from './publicShareCrypto';
 
 interface SharedFile {
@@ -61,13 +62,18 @@ export default function PublicShare() {
   const [isDownloading, setIsDownloading] = createSignal(false);
   const [downloadingFileId, setDownloadingFileId] = createSignal<string | null>(null);
   const [pendingBlobSave, setPendingBlobSave] = createSignal<{ blob: Blob; filename: string } | null>(null);
-  const [decryptionKey, setDecryptionKey] = createSignal<string | null>(null);
-  const [decryptionIv, setDecryptionIv] = createSignal<string | null>(null);
+  const [passphrase, setPassphrase] = createSignal('');
+  const [isUnlocking, setIsUnlocking] = createSignal(false);
+  const [unlockError, setUnlockError] = createSignal<string | null>(null);
+  const [unlockedKeys, setUnlockedKeys] = createSignal<Record<string, CryptoKey>>({});
+  const [publicKdf, setPublicKdf] = createSignal<any>(null);
+  const [publicItems, setPublicItems] = createSignal<Record<string, { wrappedKey: string; wrappedKeyIv: string }>>({});
   
   // Preview state (for single files)
   const [previewUrl, setPreviewUrl] = createSignal<string | null>(null);
   const [previewMimeType, setPreviewMimeType] = createSignal<string | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = createSignal(false);
+  const [previewError, setPreviewError] = createSignal<string | null>(null);
   const [textContent, setTextContent] = createSignal<string | null>(null);
   
   // Get token from URL path and key from fragment
@@ -77,39 +83,7 @@ export default function PublicShare() {
     return match ? match[1] : null;
   };
   
-  // Extract key and IV from URL fragment (format: #key:iv)
-  const parseFragment = () => {
-    const hash = window.location.hash.slice(1); // Remove #
-    if (!hash) return null;
-    if (hash.startsWith('bundle=')) {
-      const enc = hash.slice('bundle='.length);
-      try {
-        const padded = enc.replace(/-/g, '+').replace(/_/g, '/');
-        const json = decodeURIComponent(escape(atob(padded)));
-        const parsed = JSON.parse(json) as { v: number; keys: Record<string, { k: string; iv?: string }> };
-        if (parsed && parsed.v === 1 && parsed.keys && typeof parsed.keys === 'object') {
-          return { bundle: parsed.keys } as const;
-        }
-      } catch {
-        return null;
-      }
-      return null;
-    }
-    const parts = hash.split(':');
-    if (parts.length === 2) return { key: parts[0], iv: parts[1] };
-    return null;
-  };
-  
   const token = getToken();
-
-  // When user clicks browser back from share, go to home instead of previous page (e.g. folder view)
-  onMount(() => {
-    const handlePopState = () => {
-      window.location.href = ROUTES.home;
-    };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  });
 
   // Close menu when clicking outside
   createEffect(() => {
@@ -137,17 +111,7 @@ export default function PublicShare() {
   createEffect(() => {
     void (async () => {
       const t0 = Date.now();
-      // Parse the fragment for decryption key (single file) or bundle (folder share)
-      const fragment = parseFragment();
-      if (fragment) {
-        if ('key' in fragment) {
-          setDecryptionKey(fragment.key);
-          setDecryptionIv(fragment.iv);
-        } else {
-          setDecryptionKey(null);
-          setDecryptionIv(null);
-        }
-      }
+      // Passphrase-based public shares: key is never in URL.
 
       if (!token) {
         setError('Invalid share link');
@@ -162,8 +126,12 @@ export default function PublicShare() {
           folder?: { id: string; filename?: string; children?: FolderItem[] };
           file?: SharedFile;
           msg?: string;
+          kdf?: any;
+          items?: Record<string, { wrappedKey: string; wrappedKeyIv: string }>;
         };
         const data = await publicRequestJson<PublicMeta>(`/public/${token}`);
+        setPublicKdf(data.kdf || null);
+        setPublicItems(data.items || {});
 
         if (data.isFolder) {
           setIsFolder(true);
@@ -171,32 +139,8 @@ export default function PublicShare() {
           if (!folderData) {
             setError('Invalid share data');
           } else {
-            // Decrypt encrypted filenames in the folder tree using the per-item key bundle (when present).
-            const decryptFolderItems = async (items: FolderItem[]): Promise<FolderItem[]> => {
-              return Promise.all(items.map(async (item) => {
-                let decryptedName = item.filename;
-                if (isEncryptedFilename(item.filename) && fragment && 'bundle' in fragment) {
-                  const entry = fragment.bundle[item.id];
-                  if (entry?.k) {
-                    try {
-                      const itemKey = await importFileKey(entry.k);
-                      decryptedName = await decryptEncryptedFilename(item.filename, itemKey);
-                    } catch { /* keep raw */ }
-                  }
-                } else if (isEncryptedFilename(item.filename) && fragment && 'key' in fragment) {
-                  // Back-compat: treat as single-key share
-                  try {
-                    const itemKey = await importFileKey(fragment.key);
-                    decryptedName = await decryptEncryptedFilename(item.filename, itemKey);
-                  } catch { /* keep raw */ }
-                }
-                const children = item.children ? await decryptFolderItems(item.children) : undefined;
-                return { ...item, filename: decryptedName, children };
-              }));
-            };
-
             const folderName = folderData.filename || 'Folder';
-            const children = Array.isArray(folderData.children) ? await decryptFolderItems(folderData.children) : [];
+            const children = Array.isArray(folderData.children) ? folderData.children : [];
 
             setFolder({ id: folderData.id, filename: folderName, children });
           }
@@ -206,19 +150,7 @@ export default function PublicShare() {
           if (!sharedFile) {
             setError('Invalid share data');
           } else {
-            // Decrypt encrypted filename using the key from the URL fragment
-            let displayName = sharedFile.filename;
-            if (fragment && isEncryptedFilename(sharedFile.filename)) {
-              try {
-                const fileKey = await importFileKey(fragment.key);
-                displayName = await decryptEncryptedFilename(sharedFile.filename, fileKey);
-              } catch { /* keep raw */ }
-            }
-            const decryptedFile = { ...sharedFile, filename: displayName };
-            setFile(decryptedFile);
-            if (fragment && isPreviewable(decryptedFile.filename)) {
-              loadPreview(fragment.key, fragment.iv, decryptedFile.filename);
-            }
+            setFile(sharedFile);
           }
         }
       } catch (err) {
@@ -230,35 +162,105 @@ export default function PublicShare() {
     })();
   });
   
-  const loadPreview = async (key: string, iv: string, filename: string) => {
-    if (!token) return;
+  const unlock = async () => {
+    if (!publicKdf()) {
+      setUnlockError('This link is missing encryption metadata. Ask the owner to recreate it.');
+      return;
+    }
+    if (passphrase().trim().length < 1) {
+      setUnlockError('Enter the passphrase.');
+      return;
+    }
+    setUnlockError(null);
+    setIsUnlocking(true);
+    try {
+      const kdf = publicKdf();
+      if (kdf.alg !== 'pbkdf2-sha256') throw new Error('Unsupported KDF');
+      const iterations = (kdf.params?.iterations as number) || 310000;
+      const shareKey = await derivePublicShareKeyPBKDF2(passphrase(), kdf.salt, iterations);
 
+      if (!isFolder()) {
+        const k = kdf.wrappedKey;
+        const kiv = kdf.wrappedKeyIv;
+        if (!k || !kiv) throw new Error('Missing wrapped key');
+        const fileKey = await unwrapFileKeyFromPublicShare(k, kiv, shareKey);
+        const f = file();
+        if (f && isEncryptedFilename(f.filename)) {
+          try {
+            const display = await decryptEncryptedFilename(f.filename, fileKey);
+            setFile({ ...f, filename: display });
+          } catch { /* keep raw */ }
+        }
+        setUnlockedKeys({ [f?.id || '']: fileKey });
+        if (f && isPreviewable(f.filename)) {
+          loadPreviewFromKey(f.id, fileKey, f.filename, f.iv);
+        }
+      } else {
+        const items = publicItems();
+        const keys: Record<string, CryptoKey> = {};
+        for (const [fileId, entry] of Object.entries(items)) {
+          try {
+            keys[fileId] = await unwrapFileKeyFromPublicShare(entry.wrappedKey, entry.wrappedKeyIv, shareKey);
+          } catch { /* ignore */ }
+        }
+        setUnlockedKeys(keys);
+
+        // Decrypt names in the visible folder tree (best-effort).
+        const decryptTree = async (list: FolderItem[]): Promise<FolderItem[]> => {
+          return Promise.all(list.map(async (item) => {
+            let name = item.filename;
+            const k = keys[item.id];
+            if (k && isEncryptedFilename(item.filename)) {
+              try { name = await decryptEncryptedFilename(item.filename, k); } catch { /* keep */ }
+            }
+            const children = item.children ? await decryptTree(item.children) : undefined;
+            return { ...item, filename: name, children };
+          }));
+        };
+        const f = folder();
+        if (f) {
+          const children = await decryptTree(f.children || []);
+          setFolder({ ...f, children });
+        }
+      }
+    } catch (e: any) {
+      if (e instanceof TypeError && /Failed to fetch|NetworkError|load failed/i.test(String(e.message))) {
+        setUnlockError('Network error. Check your connection and try again.');
+      } else if (e?.name === 'OperationError' || e?.name === 'InvalidAccessError') {
+        setUnlockError('Could not unlock with that passphrase. Please try again.');
+      } else if (e?.message === 'Unsupported KDF') {
+        setUnlockError('This link uses an unsupported encryption format. Ask the owner to recreate the share.');
+      } else {
+        setUnlockError('Wrong passphrase, or the link is damaged or was changed.');
+      }
+    } finally {
+      setIsUnlocking(false);
+    }
+  };
+
+  const loadPreviewFromKey = async (_fileId: string, fileKey: CryptoKey, filename: string, fileIvB64: string) => {
+    if (!token) return;
     const t0 = Date.now();
     setIsLoadingPreview(true);
-
+    setPreviewError(null);
     try {
       const response = await publicRequestRaw(`/public/${token}/download`);
       const encryptedData = await response.arrayBuffer();
-      const cryptoKey = await importFileKey(key);
-      const ivBytes = new Uint8Array(base64ToArrayBuffer(iv));
-      const decryptedData = await decryptSharedFile(encryptedData, cryptoKey, ivBytes);
-      
+      const ivBytes = new Uint8Array(base64ToArrayBuffer(fileIvB64));
+      const decryptedData = await decryptSharedFile(encryptedData, fileKey, ivBytes);
       const mimeType = getMimeType(filename);
       setPreviewMimeType(mimeType);
-      
-      // For text files (except CSV), read as text
       if ((mimeType.startsWith('text/') && mimeType !== 'text/csv') || mimeType === 'application/json') {
         const text = new TextDecoder().decode(decryptedData);
         setTextContent(text);
       } else {
-        // For binary files (images, video, audio, PDF, CSV, Excel, Word), create blob URL
         const blob = new Blob([decryptedData], { type: mimeType });
         const url = URL.createObjectURL(blob);
         setPreviewUrl(url);
       }
-    } catch (err) {
-      logger.error('Preview error:', err);
-      // Don't show error, just don't show preview
+    } catch (e) {
+      logger.error('Preview error:', e);
+      setPreviewError('Preview could not be loaded. You can still try downloading the file.');
     } finally {
       await awaitMinElapsed(t0, MIN_CONTENT_LOAD_MS);
       setIsLoadingPreview(false);
@@ -286,19 +288,14 @@ export default function PublicShare() {
         blob = new Blob([textContent()!], { type: previewMimeType() || 'text/plain' });
       } else {
         const response = await publicRequestRaw(`/public/${token}/download`);
-        const key = decryptionKey();
-        const iv = decryptionIv();
-
-        if (key && iv) {
-          const encryptedData = await response.arrayBuffer();
-          const cryptoKey = await importFileKey(key);
-          const ivBytes = new Uint8Array(base64ToArrayBuffer(iv));
-          const decryptedData = await decryptSharedFile(encryptedData, cryptoKey, ivBytes);
-          const mimeType = getMimeType(file()!.filename);
-          blob = new Blob([decryptedData], { type: mimeType });
-        } else {
-          blob = await response.blob();
-        }
+        const encryptedData = await response.arrayBuffer();
+        const f = file()!;
+        const k = unlockedKeys()[f.id];
+        if (!k) throw new Error('Locked - enter passphrase');
+        const ivBytes = new Uint8Array(base64ToArrayBuffer(f.iv));
+        const decryptedData = await decryptSharedFile(encryptedData, k, ivBytes);
+        const mimeType = getMimeType(f.filename);
+        blob = new Blob([decryptedData], { type: mimeType });
       }
 
       const fname = file()!.filename;
@@ -330,22 +327,12 @@ export default function PublicShare() {
       const response = await publicRequestRaw(`/public/${token}/file/${item.id}/download`);
       const encryptedData = await response.arrayBuffer();
 
-      // If a bundle key is present, decrypt the file content in-browser; otherwise download encrypted bytes.
-      const fragment = parseFragment();
-      let blob: Blob;
-      if (fragment && 'bundle' in fragment) {
-        const entry = fragment.bundle[item.id];
-        if (entry?.k && (entry.iv || item.iv)) {
-          const cryptoKey = await importFileKey(entry.k);
-          const ivBytes = new Uint8Array(base64ToArrayBuffer(entry.iv || item.iv!));
-          const decrypted = await decryptSharedFile(encryptedData, cryptoKey, ivBytes);
-          blob = new Blob([decrypted], { type: 'application/octet-stream' });
-        } else {
-          blob = new Blob([encryptedData], { type: 'application/octet-stream' });
-        }
-      } else {
-        blob = new Blob([encryptedData], { type: 'application/octet-stream' });
-      }
+      const k = unlockedKeys()[item.id];
+      if (!k || !item.iv) throw new Error('Locked - enter passphrase');
+      const ivBytes = new Uint8Array(base64ToArrayBuffer(item.iv));
+      const decryptedData = await decryptSharedFile(encryptedData, k, ivBytes);
+      const mimeType = getMimeType(item.filename);
+      const blob = new Blob([decryptedData], { type: mimeType });
 
       if (prefersExplicitSaveStep()) {
         setPendingBlobSave({ blob, filename: item.filename });
@@ -501,8 +488,14 @@ export default function PublicShare() {
     return null;
   };
   
+  // Folder list only after unlock when passphrase KDF is present; otherwise the unlock card is primary.
+  const canBrowseFolder = () => {
+    if (!publicKdf()) return true;
+    return Object.keys(unlockedKeys()).length > 0;
+  };
   // Single full-page Drive-style layout for all share types (folder + file + loading + error)
-  const showFolderView = () => isFolder() && folder() && !isLoading() && !error();
+  const showFolderView = () =>
+    isFolder() && folder() && !isLoading() && !error() && canBrowseFolder();
   const breadcrumbTitle = () => {
     if (isLoading()) return 'Loading...';
     if (error()) return 'Error';
@@ -521,6 +514,7 @@ export default function PublicShare() {
               onClick={goToHome}
               class="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-full transition-colors shrink-0"
               title="Home"
+              aria-label="Go to home"
             >
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
@@ -653,6 +647,34 @@ export default function PublicShare() {
           </div>
         </Show>
 
+        <Show when={!isLoading() && !error() && publicKdf() && Object.keys(unlockedKeys()).length === 0}>
+          <div class="max-w-md mx-auto bg-[#1e1e1e] border border-gray-800 rounded-2xl p-5">
+            <h2 class="text-lg font-semibold text-white mb-2">Passphrase required</h2>
+            <p class="text-gray-400 text-sm mb-4">Enter the passphrase to decrypt this share in your browser.</p>
+            <input
+              type="password"
+              value={passphrase()}
+              onInput={(e) => setPassphrase(e.currentTarget.value)}
+              class="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-1 focus:ring-primary-500"
+              placeholder="Passphrase"
+              autocomplete="current-password"
+            />
+            <Show when={unlockError()}>
+              <div class="mt-3 bg-red-500/20 border border-red-500/40 text-red-200 rounded-lg p-3 text-sm">
+                {unlockError()}
+              </div>
+            </Show>
+            <button
+              type="button"
+              onClick={unlock}
+              disabled={isUnlocking()}
+              class="mt-4 w-full py-3 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 rounded-lg text-white font-medium"
+            >
+              {isUnlocking() ? 'Unlocking...' : 'Unlock'}
+            </button>
+          </div>
+        </Show>
+
         {/* Folder view - grid/list like My Drive */}
         <Show when={showFolderView()}>
           <Show when={displayedItems().length === 0}>
@@ -732,7 +754,12 @@ export default function PublicShare() {
                           {getSharedFolderIcon(item.filename, item.isFolder, 'sm')}
                         </div>
                         <p class="flex-1 text-sm text-white truncate min-w-0">{item.filename}</p>
-                        <button onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId() === item.id ? null : item.id); }} class="p-1 text-gray-400 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId() === item.id ? null : item.id); }}
+                          class="p-1 text-gray-400 hover:text-white opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity shrink-0"
+                          aria-label="Open file actions"
+                        >
                           <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" /></svg>
                         </button>
                       </div>
@@ -765,12 +792,17 @@ export default function PublicShare() {
         </Show>
 
         {/* Single file view - same full page, content in main */}
-        <Show when={!isLoading() && !error() && !isFolder() && file()}>
+        <Show when={!isLoading() && !error() && !isFolder() && file() && Object.keys(unlockedKeys()).length > 0}>
           <div class="max-w-4xl mx-auto">
             <Show when={isLoadingPreview()}>
               <div class="flex flex-col items-center justify-center py-8 mb-6">
                 <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-500 mb-3"></div>
                 <p class="text-gray-400 text-sm">Loading preview...</p>
+              </div>
+            </Show>
+            <Show when={!isLoadingPreview() && previewError()}>
+              <div class="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-100/90 text-sm" role="status">
+                {previewError()}
               </div>
             </Show>
             <Show when={!isLoadingPreview() && (previewUrl() || textContent())}>
@@ -791,7 +823,7 @@ export default function PublicShare() {
               )}
             </button>
             <p class="text-gray-500 text-xs mt-4">
-              {decryptionKey() ? '🔓 File decrypted securely in your browser.' : '⚠️ Incomplete link - file may download encrypted.'}
+              {'🔓 File decrypted securely in your browser.'}
             </p>
           </div>
         </Show>

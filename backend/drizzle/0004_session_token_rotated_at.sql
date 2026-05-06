@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `token_rotated_at` integer;

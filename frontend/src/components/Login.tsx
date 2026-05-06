@@ -119,7 +119,7 @@ export default function Login(props: LoginProps) {
       setCurrentKeys(keys);
 
       // Update auth state
-      login(result.token, {
+      login({
         ...result.user,
         totpEnabled: requires2FA(),
       });

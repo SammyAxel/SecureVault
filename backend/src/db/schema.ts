@@ -32,6 +32,8 @@ export const sessions = sqliteTable('sessions', {
   ipAddress: text('ip_address'),
   userAgent: text('user_agent'),
   lastActive: integer('last_active', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  /** Last time the opaque session token was rotated (SESSION_ROTATE_HOURS). */
+  tokenRotatedAt: integer('token_rotated_at', { mode: 'timestamp' }),
 });
 
 // ============ FILES ============
@@ -70,6 +72,21 @@ export const publicShares = sqliteTable('public_shares', {
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
   accessCount: integer('access_count').default(0),
   maxAccess: integer('max_access'), // Optional: limit number of accesses
+  // Passphrase-protected public share wrapping (nullable for legacy shares)
+  kdfAlg: text('kdf_alg'), // e.g. 'pbkdf2-sha256'
+  kdfParams: text('kdf_params'), // JSON string
+  kdfSalt: text('kdf_salt'), // base64
+  wrappedKey: text('wrapped_key'), // base64 (AES-GCM ciphertext of raw file key)
+  wrappedKeyIv: text('wrapped_key_iv'), // base64
+});
+
+// ============ PUBLIC SHARE ITEMS (Folder per-file wrapped keys) ============
+export const publicShareItems = sqliteTable('public_share_items', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  publicShareId: integer('public_share_id').notNull().references(() => publicShares.id, { onDelete: 'cascade' }),
+  fileId: text('file_id').notNull().references(() => files.id, { onDelete: 'cascade' }),
+  wrappedKey: text('wrapped_key').notNull(),
+  wrappedKeyIv: text('wrapped_key_iv').notNull(),
 });
 
 // ============ AUDIT LOGS ============
@@ -169,6 +186,11 @@ export const publicSharesRelations = relations(publicShares, ({ one }) => ({
   file: one(files, { fields: [publicShares.fileId], references: [files.id] }),
 }));
 
+export const publicShareItemsRelations = relations(publicShareItems, ({ one }) => ({
+  publicShare: one(publicShares, { fields: [publicShareItems.publicShareId], references: [publicShares.id] }),
+  file: one(files, { fields: [publicShareItems.fileId], references: [files.id] }),
+}));
+
 export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   user: one(users, { fields: [auditLogs.userId], references: [users.id] }),
 }));
@@ -194,6 +216,8 @@ export type Notification = typeof notifications.$inferSelect;
 export type NewNotification = typeof notifications.$inferInsert;
 export type PublicShare = typeof publicShares.$inferSelect;
 export type NewPublicShare = typeof publicShares.$inferInsert;
+export type PublicShareItem = typeof publicShareItems.$inferSelect;
+export type NewPublicShareItem = typeof publicShareItems.$inferInsert;
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type NewAuditLog = typeof auditLogs.$inferInsert;
 export type Setting = typeof settings.$inferSelect;

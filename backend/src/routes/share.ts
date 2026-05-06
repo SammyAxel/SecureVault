@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { db, schema } from '../db/index.js';
-import { eq, and, gt } from 'drizzle-orm';
-import { authenticate, optionalAuth, AuthenticatedRequest } from '../middleware/auth.js';
+import { eq, and, gt, sql } from 'drizzle-orm';
+import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { generateUUID, getExpiryDate } from '../lib/crypto.js';
 import { getFile, getStream } from '../lib/storage.js';
 import { createNotification } from './notifications.js';
@@ -12,17 +12,50 @@ import { safeContentDisposition } from '../lib/sanitize.js';
 
 const shareWithUserSchema = z.object({
   fileId: z.string().uuid(),
-  recipientUsername: z.string(),
+  recipientUsername: z.string().min(1).max(200),
   encryptedKey: z.string(), // File key re-encrypted with recipient's public key
 });
+
+const kdfParamsSchema = z
+  .object({
+    iterations: z.number().int().min(1000).max(2_000_000),
+    hash: z.string().max(32),
+  })
+  .strict();
 
 const createPublicShareSchema = z.object({
   fileId: z.string().uuid(),
   expiresInHours: z.number().min(1).max(87600).default(24), // Max 10 years (87600 hours) for "permanent" links
   maxAccess: z.number().min(1).optional(),
+  // Passphrase-protected wrapping (PBKDF2/etc). Required for new-style shares.
+  kdfAlg: z.string().min(1).max(64).optional(),
+  kdfParams: kdfParamsSchema.optional(),
+  kdfSalt: z.string().min(1).optional(), // base64
+  wrappedKey: z.string().min(1).optional(), // base64
+  wrappedKeyIv: z.string().min(1).optional(), // base64
+  // For folder shares, per-file wrapped keys are stored server-side (not in URL)
+  items: z.array(z.object({
+    fileId: z.string().uuid(),
+    wrappedKey: z.string().min(1),
+    wrappedKeyIv: z.string().min(1),
+  })).optional(),
 });
 
 export async function shareRoutes(app: FastifyInstance): Promise<void> {
+
+  /**
+   * Atomically consume one access for a public share, if allowed.
+   * Returns true when access is granted; false when maxAccess has been reached.
+   */
+  const consumePublicShareAccess = (shareId: number): boolean => {
+    const res = db.run(sql`
+      UPDATE public_shares
+      SET access_count = access_count + 1
+      WHERE id = ${shareId}
+        AND (max_access IS NULL OR access_count < max_access)
+    `);
+    return (res?.changes ?? 0) > 0;
+  };
   
   // ============ SHARE WITH USER ============
   app.post('/api/share', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
@@ -208,7 +241,7 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ ok: false, msg: 'Invalid request' });
     }
     
-    const { fileId, expiresInHours, maxAccess } = body.data;
+    const { fileId, expiresInHours, maxAccess, kdfAlg, kdfParams, kdfSalt, wrappedKey, wrappedKeyIv, items } = body.data;
     
     // Verify ownership
     const file = await db.query.files.findFirst({
@@ -226,12 +259,33 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     const token = generateUUID();
     const expiresAt = getExpiryDate(expiresInHours);
     
-    await db.insert(schema.publicShares).values({
+    const inserted = await db.insert(schema.publicShares).values({
       fileId,
       token,
       expiresAt,
       maxAccess,
+      kdfAlg: kdfAlg || null,
+      kdfParams: kdfParams ? JSON.stringify(kdfParams) : null,
+      kdfSalt: kdfSalt || null,
+      wrappedKey: wrappedKey || null,
+      wrappedKeyIv: wrappedKeyIv || null,
     });
+
+    // For folder shares, store per-file wrapped keys (if provided).
+    if (file.isFolder) {
+      const shareRow = await db.query.publicShares.findFirst({ where: eq(schema.publicShares.token, token) });
+      if (shareRow && Array.isArray(items) && items.length > 0) {
+        await db.delete(schema.publicShareItems).where(eq(schema.publicShareItems.publicShareId, shareRow.id));
+        await db.insert(schema.publicShareItems).values(
+          items.map((it) => ({
+            publicShareId: shareRow.id,
+            fileId: it.fileId,
+            wrappedKey: it.wrappedKey,
+            wrappedKeyIv: it.wrappedKeyIv,
+          }))
+        );
+      }
+    }
     
     // Log audit
     await logAudit(
@@ -294,7 +348,11 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
   }
   
   // ============ ACCESS PUBLIC SHARE ============
-  app.get('/api/public/:token', async (request, reply) => {
+  app.get('/api/public/:token', {
+    config: {
+      rateLimit: { max: 30, timeWindow: '1 minute' },
+    },
+  }, async (request, reply) => {
     const { token } = request.params as { token: string };
     
     const share = await db.query.publicShares.findFirst({
@@ -309,27 +367,36 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(404).send({ ok: false, msg: 'Link not found or expired' });
     }
     
-    // Check max access
-    if (share.maxAccess && share.accessCount! >= share.maxAccess) {
-      return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
+    // Metadata access counts toward maxAccess (view-limited shares).
+    if (share.maxAccess) {
+      const ok = consumePublicShareAccess(share.id);
+      if (!ok) return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
     }
-    
-    // Increment access count
-    await db.update(schema.publicShares)
-      .set({ accessCount: share.accessCount! + 1 })
-      .where(eq(schema.publicShares.id, share.id));
     
     // If it's a folder, return folder structure with all files
     if (share.file.isFolder) {
       const children = await getFolderContents(share.file.id, share.file.ownerId);
+      const itemRows = await db.query.publicShareItems.findMany({
+        where: eq(schema.publicShareItems.publicShareId, share.id),
+      });
+      const itemKeyMap: Record<string, { wrappedKey: string; wrappedKeyIv: string }> = {};
+      for (const r of itemRows as any[]) {
+        itemKeyMap[r.fileId] = { wrappedKey: r.wrappedKey, wrappedKeyIv: r.wrappedKeyIv };
+      }
       return {
         ok: true,
         isFolder: true,
+        kdf: share.kdfAlg && share.kdfSalt ? {
+          alg: share.kdfAlg,
+          params: share.kdfParams ? JSON.parse(share.kdfParams) : null,
+          salt: share.kdfSalt,
+        } : null,
         folder: {
           id: share.file.id,
           filename: share.file.filename,
           children,
         },
+        items: itemKeyMap,
       };
     }
     
@@ -337,6 +404,13 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     return {
       ok: true,
       isFolder: false,
+      kdf: share.kdfAlg && share.kdfSalt && share.wrappedKey && share.wrappedKeyIv ? {
+        alg: share.kdfAlg,
+        params: share.kdfParams ? JSON.parse(share.kdfParams) : null,
+        salt: share.kdfSalt,
+        wrappedKey: share.wrappedKey,
+        wrappedKeyIv: share.wrappedKeyIv,
+      } : null,
       file: {
         id: share.file.id,
         filename: share.file.filename,
@@ -348,7 +422,11 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
   });
   
   // ============ DOWNLOAD FILE FROM PUBLIC FOLDER SHARE ============
-  app.get('/api/public/:token/file/:fileId/download', async (request, reply) => {
+  app.get('/api/public/:token/file/:fileId/download', {
+    config: {
+      rateLimit: { max: 30, timeWindow: '1 minute' },
+    },
+  }, async (request, reply) => {
     const { token, fileId } = request.params as { token: string; fileId: string };
     
     const share = await db.query.publicShares.findFirst({
@@ -363,8 +441,10 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(404).send({ ok: false, msg: 'Link not found or expired' });
     }
     
-    if (share.maxAccess && share.accessCount! >= share.maxAccess) {
-      return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
+    // Downloads also count toward maxAccess (prevents bypass by skipping metadata endpoint).
+    if (share.maxAccess) {
+      const ok = consumePublicShareAccess(share.id);
+      if (!ok) return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
     }
     
     // Check if this is a folder share
@@ -413,7 +493,11 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ============ DOWNLOAD PUBLIC SHARE ============
-  app.get('/api/public/:token/download', async (request, reply) => {
+  app.get('/api/public/:token/download', {
+    config: {
+      rateLimit: { max: 30, timeWindow: '1 minute' },
+    },
+  }, async (request, reply) => {
     const { token } = request.params as { token: string };
     
     const share = await db.query.publicShares.findFirst({
@@ -428,8 +512,9 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(404).send({ ok: false, msg: 'Link not found or expired' });
     }
     
-    if (share.maxAccess && share.accessCount! >= share.maxAccess) {
-      return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
+    if (share.maxAccess) {
+      const ok = consumePublicShareAccess(share.id);
+      if (!ok) return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
     }
     
     const stream = getStream(share.file.storagePath);

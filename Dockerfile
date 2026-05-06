@@ -4,25 +4,25 @@
 # ============================================
 
 # Build stage - Backend
-FROM node:20-bookworm-slim AS backend-builder
+FROM node:22-bookworm-slim AS backend-builder
 
 WORKDIR /app/backend
 COPY backend/package*.json ./
-RUN npm ci && npm cache clean --force
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi && npm cache clean --force
 COPY backend/ ./
 RUN npm run build
 
 # Build stage - Frontend  
-FROM node:20-bookworm-slim AS frontend-builder
+FROM node:22-bookworm-slim AS frontend-builder
 
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-RUN npm ci && npm cache clean --force
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi && npm cache clean --force
 COPY frontend/ ./
 RUN npm run build
 
 # Production stage
-FROM node:20-bookworm-slim AS production
+FROM node:22-bookworm-slim AS production
 
 # Security: create non-root user
 RUN groupadd -g 1001 nodejs && \
@@ -37,7 +37,7 @@ COPY --from=backend-builder --chown=securevault:nodejs /app/backend/dist ./dist
 COPY --from=backend-builder --chown=securevault:nodejs /app/backend/package*.json ./
 
 # Install only production dependencies (native compile for better-sqlite3)
-RUN npm ci --omit=dev && npm cache clean --force
+RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi && npm cache clean --force
 
 # Copy frontend build
 COPY --from=frontend-builder --chown=securevault:nodejs /app/frontend/dist ./frontend/dist

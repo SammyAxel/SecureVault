@@ -22,6 +22,17 @@ import { getStats, deleteFile } from '../lib/storage.js';
 import { checkTrustedDevice, addTrustedDevice, updateTrustedDeviceLastUsed } from './trustedDevices.js';
 import { getClientIp } from '../lib/clientIp.js';
 import { DEMO_MODE, DEMO_USERNAME, isDemoAdmin } from '../lib/demo.js';
+import { config } from '../config.js';
+import { setSessionAndCsrfCookies, clearSessionAndCsrfCookies } from '../lib/sessionCookies.js';
+
+/** Tighter than global 100/min for sign-in and registration. See server.ts global rate limit. */
+const authCredentialRateLimit = {
+  rateLimit: {
+    max: 10,
+    timeWindow: '1 minute' as const,
+    keyGenerator: (request: FastifyRequest) => getClientIp(request),
+  },
+} as const;
 
 const DEFAULT_QUOTA_BYTES = 524288000; // 500MB
 const ADMIN_QUOTA_BYTES = 5 * 1024 * 1024 * 1024; // 5GB
@@ -111,6 +122,7 @@ async function createSession(rawToken: string, userId: string, expiryHours: numb
     deviceInfo: meta.deviceInfo,
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,
+    tokenRotatedAt: new Date(),
   });
   return expiresAt;
 }
@@ -118,6 +130,9 @@ async function createSession(rawToken: string, userId: string, expiryHours: numb
 // ---------- Request-origin helper ----------
 
 function getRequestOrigin(request: FastifyRequest): string {
+  if (config.PUBLIC_APP_URL) {
+    return config.PUBLIC_APP_URL;
+  }
   const xfProto = request.headers['x-forwarded-proto'];
   const proto = (Array.isArray(xfProto) ? xfProto[0] : xfProto) || 'http';
   const xfHost = request.headers['x-forwarded-host'];
@@ -129,8 +144,13 @@ function getRequestOrigin(request: FastifyRequest): string {
 
 const registerSchema = z.object({
   username: z.string().min(3).max(80).regex(/^[a-zA-Z0-9_]+$/),
-  publicKey: z.string(),
-  encryptionPublicKey: z.string().optional(),
+  publicKey: z.string().min(1).max(100_000),
+  encryptionPublicKey: z.string().max(100_000).optional(),
+});
+
+/** 6–8 digit TOTP, or a short backup code (see generateToken(4) in 2FA setup). */
+const twoFactorCodeBodySchema = z.object({
+  code: z.string().min(4).max(32).regex(/^[A-Za-z0-9]+$/),
 });
 
 const loginChallengeSchema = z.object({
@@ -246,7 +266,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ============ REGISTER ============
-  app.post('/api/register', async (request, reply) => {
+  app.post('/api/register', { config: authCredentialRateLimit }, async (request, reply) => {
     if (DEMO_MODE) {
       return reply.status(403).send({ ok: false, msg: 'Registration is disabled in demo mode. Please use the demo admin account.' });
     }
@@ -282,7 +302,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   // ============ LOGIN CHALLENGE ============
   // Returns the same shape for known AND unknown users to prevent username enumeration.
-  app.post('/api/auth/challenge', async (request, reply) => {
+  app.post('/api/auth/challenge', { config: authCredentialRateLimit }, async (request, reply) => {
     const body = loginChallengeSchema.safeParse(request.body);
     if (!body.success) {
       return reply.status(400).send({ ok: false, msg: 'Invalid request' });
@@ -321,7 +341,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ============ LOGIN VERIFY ============
-  app.post('/api/auth/verify', async (request, reply) => {
+  app.post('/api/auth/verify', { config: authCredentialRateLimit }, async (request, reply) => {
     const body = loginVerifySchema.safeParse(request.body);
     if (!body.success) {
       return reply.status(400).send({ ok: false, msg: 'Invalid request' });
@@ -402,9 +422,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     await logAudit(user.id, user.username, 'LOGIN', 'SESSION', undefined,
       { method: totp ? '2FA' : 'ECDSA' }, getClientIp(request), request.headers['user-agent']);
 
+    setSessionAndCsrfCookies(reply, request, rawToken, expiresAt);
+
     return {
       ok: true,
-      token: rawToken,
       expiresAt: expiresAt.toISOString(),
       user: {
         id: user.id,
@@ -469,7 +490,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true, status: 'pending' as const };
   });
 
-  app.post('/api/auth/device-link/challenge', async (request, reply) => {
+  app.post('/api/auth/device-link/challenge', { config: authCredentialRateLimit }, async (request, reply) => {
     const body = deviceLinkChallengeSchema.safeParse(request.body);
     if (!body.success) {
       return reply.status(400).send({ ok: false, msg: 'Invalid request', errors: body.error.errors });
@@ -508,7 +529,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
-  app.post('/api/auth/device-link/verify', async (request, reply) => {
+  app.post('/api/auth/device-link/verify', { config: authCredentialRateLimit }, async (request, reply) => {
     const body = deviceLinkVerifySchema.safeParse(request.body);
     if (!body.success) {
       return reply.status(400).send({ ok: false, msg: 'Invalid request', errors: body.error.errors });
@@ -577,9 +598,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     await logAudit(user.id, user.username, 'LOGIN', 'SESSION', undefined,
       { method: 'DEVICE_LINK_QR' }, getClientIp(request), request.headers['user-agent']);
 
+    setSessionAndCsrfCookies(reply, request, rawToken, expiresAt);
+
     return {
       ok: true,
-      token: rawToken,
       expiresAt: expiresAt.toISOString(),
       user: {
         id: user.id,
@@ -592,7 +614,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ============ LOGOUT ============
-  app.post('/api/logout', { preHandler: authenticate }, async (request: AuthenticatedRequest) => {
+  app.post('/api/logout', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
     const tokenHash = hashSHA256(request.rawToken!);
 
@@ -629,6 +651,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     await logAudit(user.id, user.username, 'LOGOUT', 'SESSION', undefined,
       undefined, getClientIp(request), request.headers['user-agent']);
+
+    clearSessionAndCsrfCookies(reply, request);
 
     return { ok: true };
   });
@@ -670,7 +694,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   // ============ CONFIRM 2FA ============
   app.post('/api/auth/2fa/confirm', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
-    const { code } = request.body as { code: string };
+    const body = twoFactorCodeBodySchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid request', errors: body.error.flatten().fieldErrors });
+    }
+    const { code } = body.data;
 
     if (!user.totpSecret) return reply.status(400).send({ ok: false, msg: 'Please setup 2FA first' });
 
@@ -689,7 +717,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   // ============ DISABLE 2FA ============
   app.post('/api/auth/2fa/disable', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
-    const { code } = request.body as { code: string };
+    const body = twoFactorCodeBodySchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid request', errors: body.error.flatten().fieldErrors });
+    }
+    const { code } = body.data;
 
     if (!user.totpEnabled) return reply.status(400).send({ ok: false, msg: '2FA is not enabled' });
 
@@ -810,6 +842,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       expiresAt,
       ipAddress: getClientIp(request),
       userAgent: request.headers['user-agent'],
+      tokenRotatedAt: new Date(),
     });
 
     await logAudit(user.id, user.username, 'REVOKE_ALL_SESSIONS', 'SESSION', undefined,
@@ -834,6 +867,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       undefined, getClientIp(request), request.headers['user-agent']);
 
     await db.delete(schema.users).where(eq(schema.users.id, user.id));
+
+    clearSessionAndCsrfCookies(reply, request);
 
     return { ok: true };
   });

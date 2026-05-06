@@ -23,6 +23,9 @@ backend/config/storage.json
 # Local backlog
 POTENTIAL_TODOS.md
 
+# Thesis / sidang notes (local-only)
+SIDANG_QUESTIONS.md
+
 # Environment & secrets
 .env
 .env.*

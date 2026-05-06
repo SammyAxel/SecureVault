@@ -44,7 +44,8 @@ db.exec(`
     device_info TEXT,
     ip_address TEXT,
     user_agent TEXT,
-    last_active INTEGER DEFAULT (unixepoch())
+    last_active INTEGER DEFAULT (unixepoch()),
+    token_rotated_at INTEGER
   );
 
   -- Files table
@@ -82,6 +83,15 @@ db.exec(`
     created_at INTEGER DEFAULT (unixepoch()),
     access_count INTEGER DEFAULT 0,
     max_access INTEGER
+  );
+
+  -- Public share items (per-file wrapped keys for folder shares)
+  CREATE TABLE IF NOT EXISTS public_share_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    public_share_id INTEGER NOT NULL REFERENCES public_shares(id) ON DELETE CASCADE,
+    file_id TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    wrapped_key TEXT NOT NULL,
+    wrapped_key_iv TEXT NOT NULL
   );
 
   -- Audit logs table
@@ -139,6 +149,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_file_shares_file ON file_shares(file_id);
   CREATE INDEX IF NOT EXISTS idx_file_shares_recipient ON file_shares(recipient_id);
   CREATE INDEX IF NOT EXISTS idx_public_shares_token ON public_shares(token);
+  CREATE INDEX IF NOT EXISTS idx_public_share_items_share ON public_share_items(public_share_id);
+  CREATE INDEX IF NOT EXISTS idx_public_share_items_file ON public_share_items(file_id);
   CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
   CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
   CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
@@ -217,7 +229,46 @@ if (!hasTable('pending_device_links'))
     `);
   });
 
+// Passphrase public share: add wrapping columns to public_shares
+if (!hasColumn('public_shares', 'kdf_alg'))
+  runMigration('public_shares.kdf_alg', () => db.exec('ALTER TABLE public_shares ADD COLUMN kdf_alg TEXT'));
+
+if (!hasColumn('public_shares', 'kdf_params'))
+  runMigration('public_shares.kdf_params', () => db.exec('ALTER TABLE public_shares ADD COLUMN kdf_params TEXT'));
+
+if (!hasColumn('public_shares', 'kdf_salt'))
+  runMigration('public_shares.kdf_salt', () => db.exec('ALTER TABLE public_shares ADD COLUMN kdf_salt TEXT'));
+
+if (!hasColumn('public_shares', 'wrapped_key'))
+  runMigration('public_shares.wrapped_key', () => db.exec('ALTER TABLE public_shares ADD COLUMN wrapped_key TEXT'));
+
+if (!hasColumn('public_shares', 'wrapped_key_iv'))
+  runMigration('public_shares.wrapped_key_iv', () => db.exec('ALTER TABLE public_shares ADD COLUMN wrapped_key_iv TEXT'));
+
+// Passphrase public share: per-item table for folder shares
+if (!hasTable('public_share_items'))
+  runMigration('public_share_items table', () => {
+    db.exec(`
+      CREATE TABLE public_share_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        public_share_id INTEGER NOT NULL REFERENCES public_shares(id) ON DELETE CASCADE,
+        file_id TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+        wrapped_key TEXT NOT NULL,
+        wrapped_key_iv TEXT NOT NULL
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_public_share_items_share ON public_share_items(public_share_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_public_share_items_file ON public_share_items(file_id)');
+  });
+
 // Migration 5: Add 'demo_session_id' column to files table (demo mode isolation)
+if (!hasColumn('sessions', 'token_rotated_at')) {
+  runMigration('sessions.token_rotated_at', () => {
+    db.exec('ALTER TABLE sessions ADD COLUMN token_rotated_at INTEGER');
+    db.exec('UPDATE sessions SET token_rotated_at = created_at WHERE token_rotated_at IS NULL');
+  });
+}
+
 if (!hasColumn('files', 'demo_session_id')) {
   libLogger.info('Running migration: Adding demo_session_id column to files table');
   try {

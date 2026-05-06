@@ -113,7 +113,8 @@ App: http://localhost:3000 — data volume: DB under `/app/data`, files under `/
 | `CORS_ORIGIN` | CORS origin(s); unset allows flexible dev behavior | `true` (permissive) in dev |
 | `LOG_LEVEL` | Pino log level | `debug` (dev), `info` (prod) |
 | `TRASH_RETENTION_DAYS` | Purge trashed files older than N days | `30` |
-| `TRASH_PURGE_INTERVAL_HOURS` | How often purge runs | `24` |
+| `TRASH_PURGE_INTERVAL_HOURS` | How often trash + audit log retention jobs run | `24` |
+| `AUDIT_LOG_RETENTION_DAYS` | Delete `audit_logs` rows older than N days; `0` = never delete | `0` |
 | `VIRUSTOTAL_API_KEY` | Optional scan-on-upload (also configurable in admin UI) | — |
 | `MALWAREBAZAAR_API_KEY` | Optional MalwareBazaar integration | — |
 

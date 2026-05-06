@@ -21,9 +21,9 @@ export interface User {
 
 interface AuthContextValue {
   user: () => User | null;
-  token: () => string | null;
   isLoading: () => boolean;
-  login: (token: string, user: User) => void;
+  /** Session is HttpOnly cookie; call after login/device-link JSON succeeds so cookies are already set. */
+  login: (user: User) => void;
   logout: () => Promise<void>;
   updateUser: (user: Partial<User>) => void;
   resetInactivityTimer: () => void;
@@ -38,9 +38,8 @@ const MOUSEMOVE_THROTTLE_MS = 2000;
 
 export const AuthProvider: ParentComponent = (props) => {
   const [user, setUser] = createSignal<User | null>(null);
-  const [token, setToken] = createSignal<string | null>(null);
   const [isLoading, setIsLoading] = createSignal(true);
-  
+
   let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
   let lastMousemoveReset = 0;
 
@@ -49,7 +48,7 @@ export const AuthProvider: ParentComponent = (props) => {
     if (inactivityTimer) {
       clearTimeout(inactivityTimer);
     }
-    
+
     // Only set timer if user is logged in
     if (user()) {
       inactivityTimer = setTimeout(() => {
@@ -77,17 +76,12 @@ export const AuthProvider: ParentComponent = (props) => {
 
   onMount(async () => {
     const bootStarted = Date.now();
-    // Check for existing session
-    const savedToken = localStorage.getItem('securevault_token');
-    if (savedToken) {
-      try {
-        const data = await getCurrentUser();
-        setToken(savedToken);
-        setUser(data.user);
-        resetInactivityTimer();
-      } catch {
-        localStorage.removeItem('securevault_token');
-      }
+    try {
+      const data = await getCurrentUser();
+      setUser(data.user);
+      resetInactivityTimer();
+    } catch {
+      /* no valid session cookie */
     }
     await awaitMinElapsed(bootStarted, MIN_BOOTSTRAP_MS);
     setIsLoading(false);
@@ -110,10 +104,8 @@ export const AuthProvider: ParentComponent = (props) => {
     document.removeEventListener('mousemove', handleMouseMoveThrottled);
   });
 
-  const login = (newToken: string, newUser: User) => {
+  const login = (newUser: User) => {
     toast.dismissAll();
-    localStorage.setItem('securevault_token', newToken);
-    setToken(newToken);
     setUser(newUser);
     resetInactivityTimer();
   };
@@ -124,19 +116,16 @@ export const AuthProvider: ParentComponent = (props) => {
       clearTimeout(inactivityTimer);
       inactivityTimer = null;
     }
-    
-    const currentToken = token();
-    if (currentToken) {
+
+    if (user()) {
       try {
         await apiLogout();
       } catch {
         /* still clear local session */
       }
     }
-    
-    localStorage.removeItem('securevault_token');
+
     clearCurrentKeys(); // Clear encryption keys from memory and sessionStorage
-    setToken(null);
     setUser(null);
     window.dispatchEvent(new CustomEvent('auth:logout'));
   };
@@ -149,7 +138,7 @@ export const AuthProvider: ParentComponent = (props) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, logout, updateUser, resetInactivityTimer }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout, updateUser, resetInactivityTimer }}>
       {props.children}
     </AuthContext.Provider>
   );

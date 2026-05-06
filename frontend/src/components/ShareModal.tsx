@@ -1,12 +1,13 @@
 import { createSignal, Show } from 'solid-js';
 import * as api from '../lib/api';
 import type { FileItem } from '../lib/api';
-import { publicRequestJson } from '../lib/api';
 import {
   getCurrentKeys,
   importEncryptionPrivateKey,
   unwrapKey,
-  arrayBufferToBase64,
+  derivePublicShareKeyPBKDF2,
+  generatePublicShareSaltB64,
+  wrapFileKeyForPublicShare,
 } from '../lib/crypto';
 import { awaitMinElapsed, MIN_FORM_SUBMIT_MS } from '../lib/motion';
 
@@ -25,12 +26,8 @@ export default function ShareModal(props: ShareModalProps) {
   const [shareLink, setShareLink] = createSignal<string | null>(null);
   const [error, setError] = createSignal('');
   const [copied, setCopied] = createSignal(false);
-
-  const base64UrlEncode = (json: unknown) => {
-    const str = JSON.stringify(json);
-    const b64 = btoa(unescape(encodeURIComponent(str)));
-    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-  };
+  const [passphrase, setPassphrase] = createSignal('');
+  const [passphraseConfirm, setPassphraseConfirm] = createSignal('');
 
   const createShare = async () => {
     const opStart = Date.now();
@@ -38,6 +35,14 @@ export default function ShareModal(props: ShareModalProps) {
     setIsLoading(true);
     
     try {
+      const pw = passphrase();
+      if (pw.trim().length < 8) {
+        throw new Error('Passphrase must be at least 8 characters');
+      }
+      if (pw !== passphraseConfirm()) {
+        throw new Error('Passphrase confirmation does not match');
+      }
+
       let expiresInHours: number;
       let maxAccess: number | undefined;
       
@@ -58,17 +63,15 @@ export default function ShareModal(props: ShareModalProps) {
           break;
       }
       
-      const result = await api.createPublicShare(
-        props.file.id,
-        expiresInHours,
-        maxAccess
-      );
+      const kdfAlg = 'pbkdf2-sha256';
+      const kdfParams = { iterations: 310000, hash: 'SHA-256' as const };
+      const kdfSalt = generatePublicShareSaltB64(16);
+      const shareKey = await derivePublicShareKeyPBKDF2(pw, kdfSalt, kdfParams);
       
       const baseUrl = window.location.origin;
       
       if (props.file.isFolder) {
-        // Folder shares need per-item keys in the URL fragment so the public page can decrypt filenames + file contents.
-        // Bundle format: #bundle=<base64url(JSON)>
+        // Folder shares: compute per-item wrapped keys and store them server-side (not in URL).
         const keys = getCurrentKeys();
         if (!keys) {
           throw new Error('Please login again - keys not found');
@@ -76,45 +79,45 @@ export default function ShareModal(props: ShareModalProps) {
 
         const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
 
-        type FolderItem = {
-          id: string;
-          filename: string;
-          isFolder: boolean;
-          encryptedKey?: string;
-          iv?: string;
-          children?: FolderItem[];
-        };
-
-        const meta = await publicRequestJson<{
-          ok: boolean;
-          isFolder?: boolean;
-          folder?: { id: string; filename?: string; children?: FolderItem[] };
-        }>(`/public/${result.token}`);
-
-        const items = meta.folder?.children ?? [];
-        const bundle: { v: 1; keys: Record<string, { k: string; iv?: string }> } = { v: 1, keys: {} };
-
-        const walk = async (list: FolderItem[]) => {
-          for (const it of list) {
-            if (it.encryptedKey) {
-              try {
-                const fileKey = await unwrapKey(it.encryptedKey, privateKey);
-                const rawKey = await crypto.subtle.exportKey('raw', fileKey);
-                bundle.keys[it.id] = { k: arrayBufferToBase64(rawKey), iv: it.iv || undefined };
-              } catch {
-                // ignore; leave missing and the public page will show encrypted name
-              }
+        // Fetch full folder tree via authenticated listing (avoids relying on public token to discover keys).
+        const listAllDescendants = async (parentId: string): Promise<FileItem[]> => {
+          const res = await api.listFiles(parentId);
+          const direct = res.files;
+          const out: FileItem[] = [...direct];
+          for (const it of direct) {
+            if (it.isFolder) {
+              const more = await listAllDescendants(it.id);
+              out.push(...more);
             }
-            if (it.children?.length) await walk(it.children);
           }
+          return out;
         };
 
-        await walk(items);
+        const all = await listAllDescendants(props.file.id);
+        // Include the root folder itself so its name can be decrypted publicly.
+        const root: FileItem = props.file;
+        const allWithRoot = [root, ...all];
 
-        const bundleEnc = base64UrlEncode(bundle);
-        setShareLink(`${baseUrl}/share/${result.token}#bundle=${bundleEnc}`);
+        const wrappedItems: Array<{ fileId: string; wrappedKey: string; wrappedKeyIv: string }> = [];
+        for (const it of allWithRoot) {
+          try {
+            const fk = await unwrapKey(it.encryptedKey, privateKey);
+            const wrapped = await wrapFileKeyForPublicShare(fk, shareKey);
+            wrappedItems.push({ fileId: it.id, wrappedKey: wrapped.wrappedKey, wrappedKeyIv: wrapped.wrappedKeyIv });
+          } catch {
+            // Ignore: item name/content will remain encrypted for public viewers.
+          }
+        }
+
+        const result = await api.createPublicShare(props.file.id, expiresInHours, maxAccess, {
+          kdfAlg,
+          kdfParams,
+          kdfSalt,
+          items: wrappedItems,
+        });
+
+        setShareLink(`${baseUrl}/share/${result.token}`);
       } else {
-        // For files, include the decryption key in the URL fragment
         const keys = getCurrentKeys();
         if (!keys) {
           throw new Error('Please login again - keys not found');
@@ -123,14 +126,17 @@ export default function ShareModal(props: ShareModalProps) {
         // Decrypt the file key using owner's private key
         const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
         const fileKey = await unwrapKey(props.file.encryptedKey, privateKey);
-        
-        // Export the raw key for the share URL
-        const rawKey = await crypto.subtle.exportKey('raw', fileKey);
-        const keyBase64 = arrayBufferToBase64(rawKey);
-        
-        // Build full URL with key in fragment (fragment is not sent to server)
-        // Format: /share/{token}#{key}:{iv}
-        setShareLink(`${baseUrl}/share/${result.token}#${keyBase64}:${props.file.iv}`);
+        const wrapped = await wrapFileKeyForPublicShare(fileKey, shareKey);
+
+        const result = await api.createPublicShare(props.file.id, expiresInHours, maxAccess, {
+          kdfAlg,
+          kdfParams,
+          kdfSalt,
+          wrappedKey: wrapped.wrappedKey,
+          wrappedKeyIv: wrapped.wrappedKeyIv,
+        });
+
+        setShareLink(`${baseUrl}/share/${result.token}`);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to create share link');
@@ -152,19 +158,25 @@ export default function ShareModal(props: ShareModalProps) {
     <div
       class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 sv-modal-overlay"
       onClick={props.onClose}
+      role="presentation"
     >
       <div
         class="bg-gray-800 rounded-xl max-w-md w-full overflow-hidden sv-modal-panel"
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="share-modal-title"
       >
         {/* Header */}
         <div class="flex items-center justify-between px-6 py-4 border-b border-gray-700">
-          <h3 class="text-lg font-medium text-white">
+          <h3 id="share-modal-title" class="text-lg font-medium text-white">
             Share {props.file.isFolder ? 'Folder' : 'File'}
           </h3>
           <button
+            type="button"
             onClick={props.onClose}
             class="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-700"
+            aria-label="Close"
           >
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -222,9 +234,11 @@ export default function ShareModal(props: ShareModalProps) {
                 </button>
               </div>
               <p class="text-gray-500 text-sm mt-3">
-                {shareType() === 'permanent' && 'This link will never expire.'}
+                {shareType() === 'permanent' &&
+                  'This link is set to stay valid for up to 10 years (revoke it anytime in your vault).'}
                 {shareType() === 'days' && `This link will expire in ${days()} day${days() > 1 ? 's' : ''}.`}
-                {shareType() === 'views' && `This link will expire after ${maxViews()} view${maxViews() > 1 ? 's' : ''}.`}
+                {shareType() === 'views' &&
+                  `This link expires after ${maxViews()} view${maxViews() > 1 ? 's' : ''}, or after 30 days, whichever comes first.`}
               </p>
               
               <button
@@ -253,8 +267,8 @@ export default function ShareModal(props: ShareModalProps) {
                   class="w-4 h-4 text-primary-500"
                 />
                 <div>
-                  <div class="text-white font-medium">Permanent Link</div>
-                  <div class="text-gray-400 text-sm">Never expires</div>
+                  <div class="text-white font-medium">Long-term link</div>
+                  <div class="text-gray-400 text-sm">Up to 10 years (you can revoke early)</div>
                 </div>
               </label>
               
@@ -327,6 +341,30 @@ export default function ShareModal(props: ShareModalProps) {
                   </div>
                 </div>
               </Show>
+            </div>
+
+            {/* Passphrase */}
+            <div class="space-y-3 mb-6">
+              <label class="block text-gray-400 text-sm mb-2">Passphrase</label>
+              <input
+                type="password"
+                value={passphrase()}
+                onInput={(e) => setPassphrase(e.currentTarget.value)}
+                class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500"
+                placeholder="Enter a passphrase (min 8 chars)"
+                autocomplete="new-password"
+              />
+              <input
+                type="password"
+                value={passphraseConfirm()}
+                onInput={(e) => setPassphraseConfirm(e.currentTarget.value)}
+                class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500"
+                placeholder="Confirm passphrase"
+                autocomplete="new-password"
+              />
+              <p class="text-gray-500 text-xs">
+                Anyone with the link and passphrase can decrypt this share. The passphrase is never sent to the server.
+              </p>
             </div>
             
             <button

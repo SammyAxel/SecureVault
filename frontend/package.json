@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "cropperjs": "^1.6.2",
+    "dompurify": "^3.4.1",
     "mammoth": "^1.6.0",
     "qrcode": "^1.5.4",
     "solid-js": "^1.8.11",

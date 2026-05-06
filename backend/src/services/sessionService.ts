@@ -16,6 +16,7 @@ export async function createSession(userId: string, expiryHours: number, meta: {
     deviceInfo: meta.deviceInfo,
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,
+    tokenRotatedAt: new Date(),
   });
 
   return { rawToken, expiresAt };

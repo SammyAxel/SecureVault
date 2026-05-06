@@ -1,5 +1,21 @@
 const API_BASE = '/api';
 
+const CSRF_COOKIE = 'sv_csrf';
+const CSRF_HEADER = 'X-CSRF-Token';
+
+function readCookie(name: string): string | undefined {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = document.cookie.match(new RegExp(`(?:^|; )${esc}=([^;]*)`));
+  return m ? decodeURIComponent(m[1]) : undefined;
+}
+
+function csrfHeaderRecord(): Record<string, string> {
+  const t = readCookie(CSRF_COOKIE);
+  return t ? { [CSRF_HEADER]: t } : {};
+}
+
+const credentialsInit: RequestInit = { credentials: 'include' };
+
 /** Trim whitespace; login/register match usernames exactly (SQLite is case-sensitive). */
 function normalizeUsername(username: string): string {
   return username.trim();
@@ -20,21 +36,17 @@ async function request<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = localStorage.getItem('securevault_token');
-  
   const headers: HeadersInit = {
+    ...csrfHeaderRecord(),
     ...options.headers,
   };
-  
-  if (token) {
-    (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
-  }
-  
+
   if (options.body && !(options.body instanceof FormData)) {
     (headers as Record<string, string>)['Content-Type'] = 'application/json';
   }
-  
+
   const response = await fetch(`${API_BASE}${endpoint}`, {
+    ...credentialsInit,
     ...options,
     headers,
   });
@@ -55,13 +67,17 @@ async function request<T>(
   return data as T;
 }
 
-/** JSON GET/POST without Authorization (public share links, etc.). */
+/** JSON fetch for paths that skip CSRF (login, register, public share, etc.). Uses cookies when present. */
 export async function publicRequestJson<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const headers: HeadersInit = { ...options.headers };
   if (options.body && !(options.body instanceof FormData)) {
     (headers as Record<string, string>)['Content-Type'] = 'application/json';
   }
-  const response = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+  const response = await fetch(`${API_BASE}${endpoint}`, {
+    ...credentialsInit,
+    ...options,
+    headers,
+  });
   const text = await response.text();
   let data: unknown = {};
   try {
@@ -78,7 +94,7 @@ export async function publicRequestJson<T>(endpoint: string, options: RequestIni
 
 /** Unauthenticated fetch; throws ApiError when status is not ok (body parsed for `msg` when JSON). */
 export async function publicRequestRaw(endpoint: string, init?: RequestInit): Promise<Response> {
-  const response = await fetch(`${API_BASE}${endpoint}`, init);
+  const response = await fetch(`${API_BASE}${endpoint}`, { ...credentialsInit, ...init });
   if (!response.ok) {
     const text = await response.text();
     let msg = 'Request failed';
@@ -164,7 +180,6 @@ export async function verifyLogin(
 ) {
   return request<{
     ok: boolean;
-    token: string;
     expiresAt: string;
     user: {
       id: string;
@@ -255,7 +270,6 @@ export async function verifyDeviceLink(
 ) {
   return publicRequestJson<{
     ok: boolean;
-    token: string;
     expiresAt: string;
     user: {
       id: string;
@@ -457,10 +471,8 @@ export async function downloadFile(fileId: string): Promise<{
   iv: string;
   filename: string;
 }> {
-  const token = localStorage.getItem('securevault_token');
-  
   const response = await fetch(`${API_BASE}/files/${fileId}/download`, {
-    headers: { Authorization: `Bearer ${token}` },
+    ...credentialsInit,
   });
   
   if (!response.ok) {
@@ -541,16 +553,30 @@ export async function getSharedWithMe() {
 export async function createPublicShare(
   fileId: string,
   expiresInHours = 24,
-  maxAccess?: number
+  maxAccess?: number,
+  opts?: {
+    kdfAlg: string;
+    kdfParams: Record<string, any>;
+    kdfSalt: string;
+    wrappedKey?: string;
+    wrappedKeyIv?: string;
+    items?: Array<{ fileId: string; wrappedKey: string; wrappedKeyIv: string }>;
+  }
 ) {
   return request<{
     ok: boolean;
     token: string;
     url: string;
     expiresAt: string;
+    isFolder?: boolean;
   }>('/share/public', {
     method: 'POST',
-    body: JSON.stringify({ fileId, expiresInHours, maxAccess }),
+    body: JSON.stringify({
+      fileId,
+      expiresInHours,
+      maxAccess,
+      ...(opts || {}),
+    }),
   });
 }
 

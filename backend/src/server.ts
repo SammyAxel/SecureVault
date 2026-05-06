@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
@@ -13,6 +14,7 @@ import { config } from './config.js';
 import { getClientIp } from './lib/clientIp.js';
 import { db, schema } from './db/index.js';
 import { deleteFile } from './lib/storage.js';
+import { purgeAuditLogsOlderThanDays } from './lib/auditLogRetention.js';
 import { getTrashRetentionDays, purgeTrashedOlderThanDays } from './lib/trashRetention.js';
 import { authRoutes } from './routes/auth.js';
 import { fileRoutes } from './routes/files.js';
@@ -21,6 +23,7 @@ import { adminRoutes } from './routes/admin.js';
 import notificationRoutes from './routes/notifications.js';
 import { trustedDevicesRoutes } from './routes/trustedDevices.js';
 import { auditRoutes } from './routes/audit.js';
+import { registerCsrfHook } from './lib/sessionCookies.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -73,6 +76,9 @@ await app.register(cors, {
   credentials: true,
 });
 
+await app.register(cookie);
+registerCsrfHook(app);
+
 // Security headers — no unsafe-eval; unsafe-inline kept for Vite/Solid HMR styles
 await app.register(helmet, {
   contentSecurityPolicy: {
@@ -90,7 +96,9 @@ await app.register(helmet, {
       upgradeInsecureRequests: null,
     },
   },
-  hsts: false,
+  hsts: config.ENABLE_HSTS
+    ? { maxAge: config.HSTS_MAX_AGE_SECONDS, includeSubDomains: true, preload: false }
+    : false,
 });
 
 // Global rate limit
@@ -100,27 +108,7 @@ await app.register(rateLimit, {
   keyGenerator: (request) => getClientIp(request),
 });
 
-// Stricter rate limit on auth endpoints
-await app.register(async function authRateLimitPlugin(instance) {
-  await instance.register(rateLimit, {
-    max: 10,
-    timeWindow: '1 minute',
-    keyGenerator: (request) => getClientIp(request),
-  });
-
-  instance.addHook('onRoute', (routeOptions) => {
-    const authPaths = [
-      '/api/auth/challenge',
-      '/api/auth/verify',
-      '/api/auth/2fa/verify',
-      '/api/auth/device-link/challenge',
-      '/api/auth/device-link/verify',
-    ];
-    if (routeOptions.url && authPaths.includes(routeOptions.url)) {
-      // Route-level config is handled by the encapsulated plugin
-    }
-  });
-}, { prefix: '' });
+// Stricter rate limits on credential endpoints are set per-route in routes/auth.ts (config.rateLimit).
 
 // Multipart (file uploads)
 await app.register(multipart, {
@@ -167,8 +155,9 @@ try {
   process.exit(1);
 }
 
-// ============ TRASH RETENTION ============
+// ============ TRASH & AUDIT LOG RETENTION ============
 const TRASH_RETENTION_DAYS = getTrashRetentionDays();
+const AUDIT_LOG_RETENTION_DAYS = config.AUDIT_LOG_RETENTION_DAYS;
 
 async function purgeExpiredTrash() {
   try {
@@ -186,7 +175,27 @@ async function purgeExpiredTrash() {
   }
 }
 
-await purgeExpiredTrash();
+async function purgeExpiredAuditLogs() {
+  if (AUDIT_LOG_RETENTION_DAYS <= 0) return;
+  try {
+    const res = await purgeAuditLogsOlderThanDays({ db, schema, days: AUDIT_LOG_RETENTION_DAYS });
+    if (res.deletedCount > 0) {
+      app.log.info(
+        { deletedCount: res.deletedCount, days: AUDIT_LOG_RETENTION_DAYS },
+        'Audit log retention purge completed'
+      );
+    }
+  } catch (err) {
+    app.log.error(err, 'Audit log retention purge failed');
+  }
+}
+
+async function runRetentionJobs() {
+  await purgeExpiredTrash();
+  await purgeExpiredAuditLogs();
+}
+
+await runRetentionJobs();
 
 // ============ START SERVER ============
 const HOST = config.HOST || (isDev ? 'localhost' : '0.0.0.0');
@@ -196,7 +205,7 @@ try {
   app.log.info(`SecureVault API running on http://${HOST}:${config.PORT}`);
 
   const intervalMs = Math.max(1, config.TRASH_PURGE_INTERVAL_HOURS) * 60 * 60 * 1000;
-  setInterval(purgeExpiredTrash, intervalMs).unref?.();
+  setInterval(runRetentionJobs, intervalMs).unref?.();
 } catch (err) {
   app.log.error(err);
   process.exit(1);

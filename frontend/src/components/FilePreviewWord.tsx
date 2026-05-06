@@ -1,5 +1,6 @@
 import { createSignal, createEffect, Show } from 'solid-js';
 import mammoth from 'mammoth';
+import DOMPurify from 'dompurify';
 import { awaitMinElapsed, MIN_CONTENT_LOAD_MS } from '../lib/motion';
 import { logger } from '../lib/logger';
 
@@ -16,7 +17,13 @@ export function WordPreview(props: { url: string }) {
       const arrayBuffer = await response.arrayBuffer();
 
       const result = await mammoth.convertToHtml({ arrayBuffer });
-      setHtml(result.value);
+      setHtml(
+        DOMPurify.sanitize(result.value, {
+          USE_PROFILES: { html: true },
+          FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed'],
+          FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onmouseenter', 'onmouseleave'],
+        })
+      );
 
       if (result.messages.length > 0) {
         logger.warn('Mammoth warnings:', result.messages);

@@ -1,6 +1,6 @@
 import { mkdir, writeFile, readFile, unlink, stat } from 'fs/promises';
 import { libLogger } from './logger.js';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { randomBytes } from 'crypto';
 import { existsSync, createReadStream, readFileSync } from 'fs';
 import type { ReadStream } from 'fs';
@@ -42,6 +42,22 @@ function loadStorageConfig(): { root: string } {
 }
 
 const { root: STORAGE_ROOT } = loadStorageConfig();
+const STORAGE_ROOT_ABS = resolve(STORAGE_ROOT);
+
+function safeResolve(relativePath: string): string {
+  // Prevent absolute paths and traversal out of root, even if DB is corrupted.
+  const target = resolve(STORAGE_ROOT_ABS, relativePath);
+  if (target === STORAGE_ROOT_ABS) return target;
+  const prefix = STORAGE_ROOT_ABS.endsWith('\\') || STORAGE_ROOT_ABS.endsWith('/') ? STORAGE_ROOT_ABS : STORAGE_ROOT_ABS + '\\';
+  const ok =
+    target.startsWith(prefix) ||
+    // handle non-Windows path separators defensively
+    target.startsWith((STORAGE_ROOT_ABS.endsWith('/') ? STORAGE_ROOT_ABS : STORAGE_ROOT_ABS + '/'));
+  if (!ok) {
+    throw new Error('Invalid storage path');
+  }
+  return target;
+}
 
 /**
  * Save a file to organized storage: {userId}/{YYYY-MM}/{randomName}.enc
@@ -66,13 +82,13 @@ export async function saveFile(userId: string, buffer: Buffer): Promise<StorageR
 }
 
 export async function getFile(relativePath: string): Promise<Buffer> {
-  const fullPath = join(STORAGE_ROOT, relativePath);
+  const fullPath = safeResolve(relativePath);
   return readFile(fullPath);
 }
 
 export async function deleteFile(relativePath: string): Promise<boolean> {
   try {
-    const fullPath = join(STORAGE_ROOT, relativePath);
+    const fullPath = safeResolve(relativePath);
     await unlink(fullPath);
     return true;
   } catch (error) {
@@ -82,18 +98,18 @@ export async function deleteFile(relativePath: string): Promise<boolean> {
 }
 
 export async function fileExists(relativePath: string): Promise<boolean> {
-  const fullPath = join(STORAGE_ROOT, relativePath);
+  const fullPath = safeResolve(relativePath);
   return existsSync(fullPath);
 }
 
 export async function getFileSize(relativePath: string): Promise<number> {
-  const fullPath = join(STORAGE_ROOT, relativePath);
+  const fullPath = safeResolve(relativePath);
   const stats = await stat(fullPath);
   return stats.size;
 }
 
 export function getFullPath(relativePath: string): string {
-  return join(STORAGE_ROOT, relativePath);
+  return safeResolve(relativePath);
 }
 
 /**
@@ -101,7 +117,7 @@ export function getFullPath(relativePath: string): string {
  * so the backend can be swapped (e.g. S3/NFS) later without changing routes.
  */
 export function getStream(relativePath: string): ReadStream {
-  const fullPath = join(STORAGE_ROOT, relativePath);
+  const fullPath = safeResolve(relativePath);
   return createReadStream(fullPath);
 }
 

@@ -113,8 +113,11 @@ export function encryptTotpSecret(secret: string): string {
 }
 
 /**
- * Decrypt a TOTP secret. Falls back to returning the raw string if decryption
- * fails, which handles legacy unencrypted secrets transparently.
+ * Decrypt a TOTP secret stored with encryptTotpSecret (AES-256-GCM, prepended IV+tag).
+ * On failure, returns the input unchanged so legacy plaintext secrets in the DB still work.
+ * If you rotate or replace `./data/totp.key`, re-encrypt existing users' TOTP secrets or 2FA
+ * verify will treat ciphertext as a legacy plaintext secret (and verification will fail).
+ * To fail closed on obvious ciphertext corruption, that would need a version prefix in storage.
  */
 export function decryptTotpSecret(encrypted: string): string {
   try {

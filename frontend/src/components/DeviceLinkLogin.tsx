@@ -79,7 +79,7 @@ export default function DeviceLinkLogin(props: DeviceLinkLoginProps) {
       );
 
       setCurrentKeys(keys);
-      login(result.token, {
+      login({
         ...result.user,
         totpEnabled: requires2FA(),
       });
