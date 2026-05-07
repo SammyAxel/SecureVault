@@ -29,6 +29,7 @@ export default function ShareModal(props: ShareModalProps) {
   const [passphrase, setPassphrase] = createSignal('');
   const [passphraseConfirm, setPassphraseConfirm] = createSignal('');
 
+  // ============ CREATE PUBLIC LINK ============
   const createShare = async () => {
     const opStart = Date.now();
     setError('');
@@ -187,7 +188,7 @@ export default function ShareModal(props: ShareModalProps) {
         {/* Content */}
         <div class="p-6">
           {/* File/Folder info */}
-          <div class="flex items-center gap-3 mb-6 p-3 bg-gray-700/50 rounded-lg">
+          <div class="flex items-center gap-3 mb-5 p-3 bg-gray-700/50 rounded-lg">
             {props.file.isFolder ? (
               <svg class="w-8 h-8 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
@@ -204,13 +205,14 @@ export default function ShareModal(props: ShareModalProps) {
               )}
             </div>
           </div>
-          
+
           {error() && (
             <div class="bg-red-500/20 border border-red-500 text-red-300 rounded-lg p-3 mb-4">
               {error()}
             </div>
           )}
-          
+
+          {/* ============ PUBLIC LINK MODE ============ */}
           <Show when={!shareLink()} fallback={
             /* Share link generated */
             <div>

@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { db, schema } from '../db/index.js';
-import { eq, and, gt, sql } from 'drizzle-orm';
+import { eq, and, gt, sql, inArray } from 'drizzle-orm';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { generateUUID, getExpiryDate } from '../lib/crypto.js';
 import { getFile, getStream } from '../lib/storage.js';
@@ -9,12 +9,6 @@ import { z } from 'zod';
 import { logAudit } from './admin.js';
 import { getClientIp } from '../lib/clientIp.js';
 import { safeContentDisposition } from '../lib/sanitize.js';
-
-const shareWithUserSchema = z.object({
-  fileId: z.string().uuid(),
-  recipientUsername: z.string().min(1).max(200),
-  encryptedKey: z.string(), // File key re-encrypted with recipient's public key
-});
 
 const kdfParamsSchema = z
   .object({
@@ -57,145 +51,62 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     return (res?.changes ?? 0) > 0;
   };
   
-  // ============ SHARE WITH USER ============
-  app.post('/api/share', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+  // ============ GET MY OUTGOING SHARES (Share Management) ============
+  app.get('/api/my-shares', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
-    
-    const body = shareWithUserSchema.safeParse(request.body);
-    if (!body.success) {
-      return reply.status(400).send({ ok: false, msg: 'Invalid request' });
-    }
-    
-    const { fileId, recipientUsername, encryptedKey } = body.data;
-    
-    // Verify ownership
-    const file = await db.query.files.findFirst({
+
+    const ownedFiles = await db.query.files.findMany({
       where: and(
-        eq(schema.files.id, fileId),
         eq(schema.files.ownerId, user.id),
         eq(schema.files.isDeleted, false)
       ),
     });
-    
-    if (!file) {
-      return reply.status(404).send({ ok: false, msg: 'File not found' });
-    }
-    
-    // Find recipient
-    const recipient = await db.query.users.findFirst({
-      where: eq(schema.users.username, recipientUsername),
-    });
-    
-    if (!recipient) {
-      return reply.status(404).send({ ok: false, msg: 'Recipient not found' });
-    }
-    
-    if (recipient.id === user.id) {
-      return reply.status(400).send({ ok: false, msg: 'Cannot share with yourself' });
-    }
-    
-    // Check if already shared
-    const existingShare = await db.query.fileShares.findFirst({
-      where: and(
-        eq(schema.fileShares.fileId, fileId),
-        eq(schema.fileShares.recipientId, recipient.id)
-      ),
-    });
-    
-    if (existingShare) {
-      // Update existing share
-      await db.update(schema.fileShares)
-        .set({ encryptedKey })
-        .where(eq(schema.fileShares.id, existingShare.id));
-    } else {
-      // Create new share
-      await db.insert(schema.fileShares).values({
-        fileId,
-        recipientId: recipient.id,
-        encryptedKey,
+
+    // 2. Public share links for files I own
+    const ownedFileIds = ownedFiles.map((f) => f.id);
+    let publicSharesList: Array<{
+      id: number;
+      fileId: string;
+      filename: string;
+      fileSize: number;
+      isFolder: boolean;
+      token: string;
+      expiresAt: Date | null;
+      accessCount: number;
+      maxAccess: number | null;
+      createdAt: Date | null;
+      isExpired: boolean;
+    }> = [];
+
+    if (ownedFileIds.length > 0) {
+      const pShares = await db.query.publicShares.findMany({
+        where: inArray(schema.publicShares.fileId, ownedFileIds),
+        with: { file: true },
       });
+
+      const now = new Date();
+      publicSharesList = pShares.map((ps: any) => ({
+        id: ps.id,
+        fileId: ps.fileId,
+        filename: ps.file.filename,
+        fileSize: ps.file.fileSize ?? 0,
+        isFolder: ps.file.isFolder ?? false,
+        token: ps.token,
+        expiresAt: ps.expiresAt,
+        accessCount: ps.accessCount ?? 0,
+        maxAccess: ps.maxAccess ?? null,
+        createdAt: ps.createdAt,
+        isExpired: (ps.expiresAt ? new Date(ps.expiresAt) < now : false) || (ps.maxAccess !== null && (ps.accessCount ?? 0) >= ps.maxAccess),
+      }));
     }
-    
-    // Log audit
-    await logAudit(
-      user.id,
-      user.username,
-      'SHARE_USER',
-      'FILE',
-      fileId,
-      { filename: file.filename, recipientUsername },
-      getClientIp(request),
-      request.headers['user-agent']
-    );
-    
-    // Create notification for recipient
-    await createNotification(
-      recipient.id,
-      'file_shared',
-      'File shared with you',
-      `${user.username} shared "${file.filename}" with you`,
-      `/dashboard?file=${fileId}`,
-      { fileId, filename: file.filename, sharedBy: user.username }
-    );
-    
-    return { ok: true };
-  });
-  
-  // ============ GET FILES SHARED WITH ME ============
-  app.get('/api/shared-with-me', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
-    const user = request.user!;
-    
-    const shares = await db.query.fileShares.findMany({
-      where: eq(schema.fileShares.recipientId, user.id),
-      with: {
-        file: {
-          with: { owner: true },
-        },
-      },
-    });
-    
+
     return {
       ok: true,
-      files: shares
-        .filter((s: any) => !s.file.isDeleted)
-        .map((s: any) => ({
-          id: s.file.id,
-          filename: s.file.filename,
-          fileSize: s.file.fileSize,
-          isFolder: s.file.isFolder,
-          owner: s.file.owner.username,
-          encryptedKey: s.encryptedKey,
-          iv: s.file.iv,
-          sharedAt: s.createdAt,
-        })),
+      publicShares: publicSharesList,
     };
   });
   
-  // ============ REVOKE USER SHARE ============
-  app.delete('/api/share/:fileId/:recipientId', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
-    const user = request.user!;
-    const { fileId, recipientId } = request.params as { fileId: string; recipientId: string };
-    
-    // Verify ownership
-    const file = await db.query.files.findFirst({
-      where: and(
-        eq(schema.files.id, fileId),
-        eq(schema.files.ownerId, user.id)
-      ),
-    });
-    
-    if (!file) {
-      return reply.status(404).send({ ok: false, msg: 'File not found' });
-    }
-    
-    await db.delete(schema.fileShares)
-      .where(and(
-        eq(schema.fileShares.fileId, fileId),
-        eq(schema.fileShares.recipientId, recipientId)
-      ));
-    
-    return { ok: true };
-  });
+
   
   // ============ GET MY SHARES FOR FILE ============
   app.get('/api/files/:fileId/shares', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
@@ -366,12 +277,13 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     if (!share) {
       return reply.status(404).send({ ok: false, msg: 'Link not found or expired' });
     }
-    
-    // Metadata access counts toward maxAccess (view-limited shares).
-    if (share.maxAccess) {
-      const ok = consumePublicShareAccess(share.id);
-      if (!ok) return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
+
+    if (share.maxAccess && (share.accessCount ?? 0) >= share.maxAccess) {
+      return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
     }
+    
+    // NOTE: Access is NOT counted here — it is counted via POST /api/public/:token/access
+    // after the user successfully enters the passphrase and decrypts the file.
     
     // If it's a folder, return folder structure with all files
     if (share.file.isFolder) {
@@ -420,6 +332,38 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       },
     };
   });
+
+  // ============ RECORD PUBLIC SHARE ACCESS (called after passphrase verification) ============
+  app.post('/api/public/:token/access', {
+    config: {
+      rateLimit: { max: 10, timeWindow: '1 minute' },
+    },
+  }, async (request, reply) => {
+    const { token } = request.params as { token: string };
+
+    const share = await db.query.publicShares.findFirst({
+      where: and(
+        eq(schema.publicShares.token, token),
+        gt(schema.publicShares.expiresAt, new Date())
+      ),
+    });
+
+    if (!share) {
+      return reply.status(404).send({ ok: false, msg: 'Link not found or expired' });
+    }
+
+    // Check if maxAccess has been reached before consuming
+    if (share.maxAccess && (share.accessCount ?? 0) >= share.maxAccess) {
+      return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
+    }
+
+    const ok = consumePublicShareAccess(share.id);
+    if (!ok) {
+      return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
+    }
+
+    return { ok: true };
+  });
   
   // ============ DOWNLOAD FILE FROM PUBLIC FOLDER SHARE ============
   app.get('/api/public/:token/file/:fileId/download', {
@@ -441,10 +385,9 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(404).send({ ok: false, msg: 'Link not found or expired' });
     }
     
-    // Downloads also count toward maxAccess (prevents bypass by skipping metadata endpoint).
-    if (share.maxAccess) {
-      const ok = consumePublicShareAccess(share.id);
-      if (!ok) return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
+    // Enforce maxAccess limit but do NOT consume (consumption is done via POST /access)
+    if (share.maxAccess && (share.accessCount ?? 0) >= share.maxAccess) {
+      return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
     }
     
     // Check if this is a folder share
@@ -512,9 +455,9 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(404).send({ ok: false, msg: 'Link not found or expired' });
     }
     
-    if (share.maxAccess) {
-      const ok = consumePublicShareAccess(share.id);
-      if (!ok) return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
+    // Enforce maxAccess limit but do NOT consume
+    if (share.maxAccess && (share.accessCount ?? 0) >= share.maxAccess) {
+      return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
     }
     
     const stream = getStream(share.file.storagePath);

@@ -523,33 +523,6 @@ export async function emptyTrash() {
 
 // ============ SHARING ============
 
-export async function shareWithUser(
-  fileId: string,
-  recipientUsername: string,
-  encryptedKey: string
-) {
-  return request<{ ok: boolean }>('/share', {
-    method: 'POST',
-    body: JSON.stringify({ fileId, recipientUsername, encryptedKey }),
-  });
-}
-
-export async function getSharedWithMe() {
-  return request<{
-    ok: boolean;
-    files: Array<{
-      id: string;
-      filename: string;
-      fileSize: number;
-      isFolder: boolean;
-      owner: string;
-      encryptedKey: string;
-      iv: string;
-      sharedAt: string;
-    }>;
-  }>('/shared-with-me');
-}
-
 export async function createPublicShare(
   fileId: string,
   expiresInHours = 24,
@@ -596,6 +569,47 @@ export async function getFileShares(fileId: string) {
 
 export async function deletePublicShare(token: string) {
   return request<{ ok: boolean }>(`/share/public/${token}`, {
+    method: 'DELETE',
+  });
+}
+
+// ============ SHARE MANAGEMENT ============
+
+export interface UserShareItem {
+  shareId: number;
+  fileId: string;
+  filename: string;
+  fileSize: number;
+  isFolder: boolean;
+  recipientId: string;
+  recipientUsername: string;
+  sharedAt: string;
+}
+
+export interface PublicShareItem {
+  id: number;
+  fileId: string;
+  filename: string;
+  fileSize: number;
+  isFolder: boolean;
+  token: string;
+  expiresAt: string;
+  accessCount: number;
+  maxAccess: number | null;
+  createdAt: string;
+  isExpired: boolean;
+}
+
+export async function getMyShares() {
+  return request<{
+    ok: boolean;
+    userShares: UserShareItem[];
+    publicShares: PublicShareItem[];
+  }>('/my-shares');
+}
+
+export async function revokeUserShare(fileId: string, recipientId: string) {
+  return request<{ ok: boolean }>(`/share/${fileId}/${recipientId}`, {
     method: 'DELETE',
   });
 }

@@ -22,6 +22,7 @@ import { formatAbsolute, formatRelative } from '../../lib/time';
 import { CsvPreview, ExcelPreview, WordPreview, getPreviewMimeType, isPreviewableFile } from '../FilePreview';
 import { SkeletonDashboard } from '../Skeleton';
 import DashboardTextPreview from './DashboardTextPreview';
+import ShareManagement from './ShareManagement';
 import {
   getCurrentKeys,
   importEncryptionPrivateKey,
@@ -275,20 +276,7 @@ export default function Dashboard(props: DashboardProps) {
         return;
       }
       if (section() === 'shared') {
-        const result = await api.getSharedWithMe();
-        const mapped: FileItem[] = result.files.map((f: any) => ({
-          id: f.id,
-          uid: undefined,
-          filename: f.filename,
-          fileSize: f.fileSize,
-          isFolder: f.isFolder,
-          parentId: null,
-          createdAt: f.sharedAt,
-          encryptedKey: f.encryptedKey,
-          iv: f.iv,
-          owner: f.owner,
-        }));
-        setFiles(await decryptFileNames(mapped));
+        // Share Management handles its own data loading
         return;
       }
       if (section() === 'trash') {
@@ -1208,7 +1196,14 @@ export default function Dashboard(props: DashboardProps) {
     }
   };
 
+
+
   return (
+    <Show when={section() !== 'shared'} fallback={
+      <div class="pb-20">
+        <ShareManagement />
+      </div>
+    }>
     <div class="pb-20">
       {/* Top bar: stacks on mobile */}
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
@@ -2263,5 +2258,6 @@ export default function Dashboard(props: DashboardProps) {
         onClose={() => setPendingBlobSave(null)}
       />
     </div>
+    </Show>
   );
 }

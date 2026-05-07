@@ -223,6 +223,13 @@ export default function PublicShare() {
           setFolder({ ...f, children });
         }
       }
+
+      // Record successful access (view count) AFTER passphrase is verified
+      try {
+        await publicRequestJson(`/public/${token}/access`, { method: 'POST' });
+      } catch {
+        // Non-critical: don't block the user if access recording fails
+      }
     } catch (e: any) {
       if (e instanceof TypeError && /Failed to fetch|NetworkError|load failed/i.test(String(e.message))) {
         setUnlockError('Network error. Check your connection and try again.');

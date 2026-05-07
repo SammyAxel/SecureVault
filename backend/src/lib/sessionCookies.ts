@@ -14,6 +14,7 @@ const CSRF_SKIP_PREFIXES = [
   '/api/auth/verify',
   '/api/auth/device-link/challenge',
   '/api/auth/device-link/verify',
+  '/api/public',
 ] as const;
 
 export function isRequestHttps(request: FastifyRequest): boolean {
