@@ -38,6 +38,11 @@ const envSchema = z.object({
   /** Send Strict-Transport-Security only when you serve real users over HTTPS end-to-end. */
   ENABLE_HSTS: z.coerce.boolean().default(false),
   HSTS_MAX_AGE_SECONDS: z.coerce.number().int().min(0).default(15552000),
+  /** Extra CSP connect-src origins (comma-separated), e.g. wss://socket.example.com,https://api.example.com */
+  CSP_CONNECT_SRC_EXTRA: z.string().optional(),
+  /** Cap concurrent multipart uploads process-wide (streaming still writes one file per request). */
+  UPLOAD_MAX_CONCURRENT_GLOBAL: z.coerce.number().int().min(1).max(100).default(8),
+  UPLOAD_MAX_CONCURRENT_PER_USER: z.coerce.number().int().min(1).max(50).default(2),
 });
 
 const parsed = envSchema.safeParse(process.env);

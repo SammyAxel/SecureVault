@@ -616,10 +616,24 @@ export async function revokeUserShare(fileId: string, recipientId: string) {
 
 // ============ FILE MANAGEMENT ============
 
-export async function renameFile(fileId: string, name: string) {
+export async function renameFile(
+  fileId: string,
+  payload: { name?: string; encryptedName?: string }
+) {
   return request<{ ok: boolean; filename: string }>(`/files/${fileId}/rename`, {
     method: 'PATCH',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Owner-only: set folder wrapped key + iv (and optional encrypted filename). For repairing legacy folders. */
+export async function patchFolderCryptoMetadata(
+  fileId: string,
+  payload: { encryptedKey: string; iv: string; filename?: string }
+) {
+  return request<{ ok: boolean }>(`/files/${fileId}/crypto-metadata`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
   });
 }
 

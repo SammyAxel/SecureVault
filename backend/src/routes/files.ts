@@ -2,8 +2,8 @@ import { FastifyInstance, type FastifyRequest } from 'fastify';
 import { db, schema } from '../db/index.js';
 import { eq, and, isNull, sql, inArray } from 'drizzle-orm';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
-import { saveFile, getFile, deleteFile, getStream, getStats } from '../lib/storage.js';
-import { scanUploadBuffer } from '../lib/uploadMalwareScan.js';
+import { deleteFile, getFile, getStream, getStats, saveFileStream } from '../lib/storage.js';
+import { scanUploadByHash } from '../lib/uploadMalwareScan.js';
 import { generateUUID, generateUID } from '../lib/crypto.js';
 import { getTrashRetentionDays, purgeTrashedOlderThanDays } from '../lib/trashRetention.js';
 import { z } from 'zod';
@@ -11,16 +11,58 @@ import { logAudit } from './admin.js';
 import { getClientIp } from '../lib/clientIp.js';
 import { isDemoAdmin, demoSessionFilter, DEMO_SESSION_UPLOAD_LIMIT } from '../lib/demo.js';
 import { safeContentDisposition } from '../lib/sanitize.js';
+import { config } from '../config.js';
+
+const uploadGlobalMax = config.UPLOAD_MAX_CONCURRENT_GLOBAL;
+const uploadPerUserMax = config.UPLOAD_MAX_CONCURRENT_PER_USER;
+type UploadReleaseFn = () => void;
+const uploadWaiters: Array<() => void> = [];
+let uploadGlobalActive = 0;
+const uploadPerUserActive = new Map<string, number>();
+
+function tryGrantUploadSlot(userId: string): UploadReleaseFn | null {
+  const u = uploadPerUserActive.get(userId) ?? 0;
+  if (uploadGlobalActive >= uploadGlobalMax || u >= uploadPerUserMax) return null;
+  uploadGlobalActive++;
+  uploadPerUserActive.set(userId, u + 1);
+  return () => {
+    uploadGlobalActive--;
+    const nextU = (uploadPerUserActive.get(userId) ?? 1) - 1;
+    if (nextU <= 0) uploadPerUserActive.delete(userId);
+    else uploadPerUserActive.set(userId, nextU);
+    const w = uploadWaiters.shift();
+    if (w) w();
+  };
+}
+
+async function acquireUploadSlot(userId: string): Promise<UploadReleaseFn> {
+  for (;;) {
+    const rel = tryGrantUploadSlot(userId);
+    if (rel) return rel;
+    await new Promise<void>((resolve) => uploadWaiters.push(resolve));
+  }
+}
 
 const createFolderSchema = z.object({
   name: z.string().min(1).max(2048),
   parentId: z.string().uuid().optional().nullable(),
-  encryptedKey: z.string().optional(),
-  iv: z.string().optional(),
+  encryptedKey: z.string().min(1),
+  iv: z.string().min(1),
 });
 
-const renameSchema = z.object({
-  name: z.string().min(1).max(2048),
+const renameSchema = z
+  .object({
+    name: z.string().min(1).max(2048).optional(),
+    encryptedName: z.string().min(1).max(4096).optional(),
+  })
+  .refine((d) => d.name != null || d.encryptedName != null, {
+    message: 'Provide name or encryptedName',
+  });
+
+const folderCryptoMetadataSchema = z.object({
+  encryptedKey: z.string().min(1),
+  iv: z.string().min(1),
+  filename: z.string().min(1).max(4096).optional(),
 });
 
 const moveSchema = z.object({
@@ -179,158 +221,171 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   // ============ UPLOAD FILE ============
   app.post('/api/upload', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
-    
+
     const data = await request.file();
     if (!data) {
       return reply.status(400).send({ ok: false, msg: 'No file provided' });
     }
-    
-    const buffer = await data.toBuffer();
-    const fileSize = buffer.length;
-    
-    // Check storage quota
-    const remaining = user.storageQuota! - user.storageUsed!;
-    if (fileSize > remaining) {
-      return reply.status(400).send({
-        ok: false,
-        msg: `Storage quota exceeded. You have ${remaining} bytes remaining.`,
-        quotaExceeded: true,
+
+    const releaseSlot = await acquireUploadSlot(user.id);
+    let savedPath: string | null = null;
+    try {
+      if (!data.file) {
+        return reply.status(400).send({ ok: false, msg: 'No file stream' });
+      }
+
+      const { relativePath, size: fileSize, sha256: streamSha256 } = await saveFileStream(user.id, data.file);
+      savedPath = relativePath;
+
+      const remaining = user.storageQuota! - user.storageUsed!;
+      if (fileSize > remaining) {
+        await deleteFile(relativePath);
+        return reply.status(400).send({
+          ok: false,
+          msg: `Storage quota exceeded. You have ${remaining} bytes remaining.`,
+          quotaExceeded: true,
+        });
+      }
+
+      const backendStats = await getStats();
+      if (backendStats && backendStats.free < fileSize) {
+        await deleteFile(relativePath);
+        return reply.status(507).send({
+          ok: false,
+          msg: 'Storage backend is full. Not enough disk space.',
+        });
+      }
+
+      const fields = data.fields as Record<string, { value?: string }>;
+      const encryptedKey = fields.encrypted_key?.value;
+      const iv = fields.iv?.value;
+      const fileHashField = fields.file_hash?.value?.trim().toLowerCase();
+      const parentId = fields.parent_id?.value || null;
+      const encryptedFilename = fields.encrypted_filename?.value;
+
+      if (!encryptedKey || !iv) {
+        await deleteFile(relativePath);
+        return reply.status(400).send({ ok: false, msg: 'Missing encryption metadata' });
+      }
+
+      if (fileHashField && fileHashField !== streamSha256) {
+        await deleteFile(relativePath);
+        return reply.status(400).send({ ok: false, msg: 'File hash mismatch' });
+      }
+
+      const storedFilename = encryptedFilename || data.filename;
+
+      const scanHash = fileHashField || streamSha256;
+      const { vtResult, mbResult } = await scanUploadByHash(scanHash, data.filename);
+
+      if (!vtResult.safe || !mbResult.safe) {
+        await deleteFile(relativePath);
+        const msg = !vtResult.safe
+          ? (vtResult.error ?? `File flagged as malicious (${vtResult.malicious ?? 0} engines). Upload blocked.`)
+          : (mbResult.error ?? (mbResult.signature ? `File is known malware (${mbResult.signature}). Upload blocked.` : 'File flagged by Malware Bazaar. Upload blocked.'));
+
+        await logAudit(
+          user.id,
+          user.username,
+          'UPLOAD_BLOCKED',
+          'FILE',
+          undefined,
+          {
+            filename: data.filename,
+            fileSize,
+            virusTotalScan: !vtResult.safe ? {
+              result: 'MALICIOUS',
+              maliciousCount: vtResult.malicious ?? 0,
+              suspiciousCount: vtResult.suspicious ?? 0,
+              hashFound: vtResult.hashFound ?? false,
+              error: vtResult.error ?? null,
+            } : undefined,
+            malwareBazaarScan: !mbResult.safe ? {
+              result: 'MALICIOUS',
+              hashFound: mbResult.hashFound,
+              signature: mbResult.signature,
+              error: mbResult.error ?? null,
+            } : undefined,
+          },
+          getClientIp(request),
+          request.headers['user-agent']
+        );
+
+        return reply.status(400).send({
+          ok: false,
+          msg,
+          malwareDetected: true,
+        });
+      }
+
+      const dsid = demoSessionFilter(request);
+      if (dsid != null) {
+        const [row] = db.all(sql`
+          SELECT COALESCE(SUM(file_size), 0) AS total
+          FROM files WHERE demo_session_id = ${dsid}
+        `) as { total: number }[];
+        if ((row?.total ?? 0) + fileSize > DEMO_SESSION_UPLOAD_LIMIT) {
+          await deleteFile(relativePath);
+          return reply.status(400).send({
+            ok: false,
+            msg: `Demo upload limit reached (25 MB per session). You have used ${Math.round((row?.total ?? 0) / 1024 / 1024)} MB.`,
+          });
+        }
+      }
+
+      const fileId = generateUUID();
+      const fileUid = generateUID();
+      await db.insert(schema.files).values({
+        id: fileId,
+        uid: fileUid,
+        filename: storedFilename,
+        ownerId: user.id,
+        encryptedKey,
+        iv,
+        storagePath: relativePath,
+        fileSize,
+        parentId,
+        demoSessionId: dsid,
       });
-    }
 
-    // Check filesystem free space (total storage follows backend disk/mount)
-    const backendStats = await getStats();
-    if (backendStats && backendStats.free < fileSize) {
-      return reply.status(507).send({
-        ok: false,
-        msg: 'Storage backend is full. Not enough disk space.',
-      });
-    }
-
-    // Get metadata from fields
-    const fields = data.fields as any;
-    const encryptedKey = fields.encrypted_key?.value;
-    const iv = fields.iv?.value;
-    const fileHash = fields.file_hash?.value;
-    const parentId = fields.parent_id?.value || null;
-    const encryptedFilename = fields.encrypted_filename?.value;
-    
-    if (!encryptedKey || !iv) {
-      return reply.status(400).send({ ok: false, msg: 'Missing encryption metadata' });
-    }
-
-    // Use encrypted filename if provided (zero-knowledge), fall back to plaintext blob name
-    const storedFilename = encryptedFilename || data.filename;
-
-    const { vtResult, mbResult } = await scanUploadBuffer(buffer, data.filename, fileHash);
-
-    if (!vtResult.safe || !mbResult.safe) {
-      const msg = !vtResult.safe
-        ? (vtResult.error ?? `File flagged as malicious (${vtResult.malicious ?? 0} engines). Upload blocked.`)
-        : (mbResult.error ?? (mbResult.signature ? `File is known malware (${mbResult.signature}). Upload blocked.` : 'File flagged by Malware Bazaar. Upload blocked.'));
+      await db.update(schema.users)
+        .set({ storageUsed: user.storageUsed! + fileSize })
+        .where(eq(schema.users.id, user.id));
 
       await logAudit(
         user.id,
         user.username,
-        'UPLOAD_BLOCKED',
+        'UPLOAD',
         'FILE',
-        undefined,
+        fileId,
         {
           filename: data.filename,
           fileSize,
-          virusTotalScan: !vtResult.safe ? {
-            result: 'MALICIOUS',
+          uid: fileUid,
+          virusTotalScan: {
+            result: vtResult.hashFound === false ? 'UNKNOWN' : 'CLEAN',
             maliciousCount: vtResult.malicious ?? 0,
             suspiciousCount: vtResult.suspicious ?? 0,
             hashFound: vtResult.hashFound ?? false,
             error: vtResult.error ?? null,
-          } : undefined,
-          malwareBazaarScan: !mbResult.safe ? {
-            result: 'MALICIOUS',
-            hashFound: mbResult.hashFound,
-            signature: mbResult.signature,
+          },
+          malwareBazaarScan: {
+            result: mbResult.hashFound === false ? 'UNKNOWN' : 'CLEAN',
+            hashFound: mbResult.hashFound ?? false,
             error: mbResult.error ?? null,
-          } : undefined,
+          },
         },
         getClientIp(request),
         request.headers['user-agent']
       );
 
-      return reply.status(400).send({
-        ok: false,
-        msg,
-        malwareDetected: true,
-      });
+      return { ok: true, fileId, uid: fileUid };
+    } catch (err) {
+      if (savedPath) await deleteFile(savedPath);
+      throw err;
+    } finally {
+      releaseSlot();
     }
-
-    // Demo mode: enforce per-session upload cap
-    const dsid = demoSessionFilter(request);
-    if (dsid != null) {
-      const [row] = db.all(sql`
-        SELECT COALESCE(SUM(file_size), 0) AS total
-        FROM files WHERE demo_session_id = ${dsid}
-      `) as { total: number }[];
-      if ((row?.total ?? 0) + fileSize > DEMO_SESSION_UPLOAD_LIMIT) {
-        return reply.status(400).send({
-          ok: false,
-          msg: `Demo upload limit reached (25 MB per session). You have used ${Math.round((row?.total ?? 0) / 1024 / 1024)} MB.`,
-        });
-      }
-    }
-
-    // Save file to storage
-    const { relativePath } = await saveFile(user.id, buffer);
-    
-    // Save metadata to database
-    const fileId = generateUUID();
-    const fileUid = generateUID();
-    await db.insert(schema.files).values({
-      id: fileId,
-      uid: fileUid,
-      filename: storedFilename,
-      ownerId: user.id,
-      encryptedKey,
-      iv,
-      storagePath: relativePath,
-      fileSize,
-      parentId,
-      demoSessionId: dsid,
-    });
-    
-    // Update user storage
-    await db.update(schema.users)
-      .set({ storageUsed: user.storageUsed! + fileSize })
-      .where(eq(schema.users.id, user.id));
-    
-    // Log audit with scan details (VirusTotal + Malware Bazaar)
-    await logAudit(
-      user.id,
-      user.username,
-      'UPLOAD',
-      'FILE',
-      fileId,
-      {
-        filename: data.filename,
-        fileSize,
-        uid: fileUid,
-        virusTotalScan: {
-          result: vtResult.hashFound === false ? 'UNKNOWN' : 'CLEAN',
-          maliciousCount: vtResult.malicious ?? 0,
-          suspiciousCount: vtResult.suspicious ?? 0,
-          hashFound: vtResult.hashFound ?? false,
-          error: vtResult.error ?? null,
-        },
-        malwareBazaarScan: {
-          result: mbResult.hashFound === false ? 'UNKNOWN' : 'CLEAN',
-          hashFound: mbResult.hashFound ?? false,
-          error: mbResult.error ?? null,
-        },
-      },
-      getClientIp(request),
-      request.headers['user-agent']
-    );
-    
-    return { ok: true, fileId, uid: fileUid };
   });
   
   // ============ CREATE FOLDER ============
@@ -351,8 +406,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       uid: folderUid,
       filename: name,
       ownerId: user.id,
-      encryptedKey: folderKey || '',
-      iv: folderIv || '',
+      encryptedKey: folderKey,
+      iv: folderIv,
       isFolder: true,
       parentId: parentId || null,
       demoSessionId: demoSessionFilter(request),
@@ -651,7 +706,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ ok: false, msg: 'Invalid request' });
     }
     
-    const { name } = body.data;
+    const storedName = body.data.encryptedName ?? body.data.name!;
     
     const file = await db.query.files.findFirst({
       where: and(
@@ -667,10 +722,50 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     }
     
     await db.update(schema.files)
-      .set({ filename: name })
+      .set({ filename: storedName })
       .where(eq(schema.files.id, fileId));
     
-    return { ok: true, filename: name };
+    return { ok: true, filename: storedName };
+  });
+
+  // ============ REPAIR FOLDER CRYPTO METADATA (owner only) ============
+  app.patch('/api/files/:fileId/crypto-metadata', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+    const user = request.user!;
+    const { fileId } = request.params as { fileId: string };
+    const dsid = demoSessionFilter(request);
+
+    const body = folderCryptoMetadataSchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid request' });
+    }
+
+    const file = await db.query.files.findFirst({
+      where: and(
+        eq(schema.files.id, fileId),
+        eq(schema.files.ownerId, user.id),
+        eq(schema.files.isDeleted, false),
+        dsid != null ? eq(schema.files.demoSessionId, dsid) : undefined
+      ),
+    });
+
+    if (!file) {
+      return reply.status(404).send({ ok: false, msg: 'File not found' });
+    }
+
+    if (!file.isFolder) {
+      return reply.status(400).send({ ok: false, msg: 'Only folder items support this metadata update' });
+    }
+
+    await db
+      .update(schema.files)
+      .set({
+        encryptedKey: body.data.encryptedKey,
+        iv: body.data.iv,
+        ...(body.data.filename !== undefined ? { filename: body.data.filename } : {}),
+      })
+      .where(eq(schema.files.id, fileId));
+
+    return { ok: true };
   });
 
   // ============ MOVE FILE/FOLDER ============

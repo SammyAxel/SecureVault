@@ -35,12 +35,11 @@ export async function trustedDevicesRoutes(app: FastifyInstance): Promise<void> 
   // ============ REMOVE TRUSTED DEVICE ============
   app.delete('/api/trusted-devices/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
-    const deviceId = parseInt((request.params as any).id);
-    
-    if (isNaN(deviceId)) {
+    const params = z.object({ id: z.coerce.number().int().positive() }).safeParse(request.params);
+    if (!params.success) {
       return reply.status(400).send({ ok: false, msg: 'Invalid device ID' });
     }
-    
+    const deviceId = params.data.id;
     // Verify device belongs to user
     const device = await db.query.trustedDevices.findFirst({
       where: and(
@@ -129,12 +128,15 @@ export async function updateTrustedDeviceLastUsed(
     ));
 }
 
-// Generate a hash of device properties for fingerprint
+/**
+ * Server-side fingerprint helper (prefer client-provided deviceFingerprint from deviceFingerprint.ts).
+ * IP is intentionally excluded — CGNAT and mobile networks make it unstable for trust decisions.
+ */
 export function generateDeviceFingerprint(
   userAgent: string,
-  ipAddress: string,
+  _ipAddress: string | undefined,
   additionalData?: string
 ): string {
-  const data = `${userAgent}|${ipAddress}|${additionalData || ''}`;
+  const data = `${userAgent}|${additionalData || ''}`;
   return crypto.createHash('sha256').update(data).digest('hex');
 }

@@ -29,6 +29,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const isDev = config.NODE_ENV !== 'production';
 
+const cspConnectSrc = [
+  "'self'",
+  'blob:',
+  ...(config.CSP_CONNECT_SRC_EXTRA
+    ? config.CSP_CONNECT_SRC_EXTRA.split(',').map((s) => s.trim()).filter(Boolean)
+    : []),
+];
+
 const app = Fastify({
   requestTimeout: 10 * 60 * 1000,
   bodyLimit: 500 * 1024 * 1024,
@@ -79,7 +87,8 @@ await app.register(cors, {
 await app.register(cookie);
 registerCsrfHook(app);
 
-// Security headers — no unsafe-eval; unsafe-inline kept for Vite/Solid HMR styles
+// Security headers — no unsafe-eval; unsafe-inline on styles is a known tradeoff for Vite/Solid inline styles in dev builds.
+// Extend connect-src via CSP_CONNECT_SRC_EXTRA if you add WebSockets, analytics, or split API origins.
 await app.register(helmet, {
   contentSecurityPolicy: {
     directives: {
@@ -91,7 +100,7 @@ await app.register(helmet, {
       mediaSrc: ["'self'", 'blob:'],
       objectSrc: ["'self'", 'blob:'],
       frameSrc: ["'self'", 'blob:'],
-      connectSrc: ["'self'", 'blob:'],
+      connectSrc: cspConnectSrc,
       workerSrc: ["'self'", 'blob:'],
       upgradeInsecureRequests: null,
     },

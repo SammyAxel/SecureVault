@@ -863,7 +863,7 @@ export default function Dashboard(props: DashboardProps) {
       const fileKey = await unwrapKey(file.encryptedKey, privateKey);
       const encName = await encryptFilename(renameName().trim(), fileKey);
 
-      await api.renameFile(file.id, encName);
+      await api.renameFile(file.id, { encryptedName: encName });
       setRenameFile(null);
       setRenameName('');
       toast.success('File renamed successfully');

@@ -14,8 +14,12 @@ const CSRF_SKIP_PREFIXES = [
   '/api/auth/verify',
   '/api/auth/device-link/challenge',
   '/api/auth/device-link/verify',
-  '/api/public',
 ] as const;
+
+/** Only this public-share POST is unauthenticated and cookie-agnostic; do not widen without review. */
+function isPublicShareAccessPost(path: string): boolean {
+  return /^\/api\/public\/[^/]+\/access$/.test(path);
+}
 
 export function isRequestHttps(request: FastifyRequest): boolean {
   const xf = request.headers['x-forwarded-proto'];
@@ -100,6 +104,7 @@ export function shouldSkipCsrfCheck(request: FastifyRequest): boolean {
   for (const p of CSRF_SKIP_PREFIXES) {
     if (path === p || path.startsWith(`${p}/`)) return true;
   }
+  if (m === 'POST' && isPublicShareAccessPost(path)) return true;
   return false;
 }
 

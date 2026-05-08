@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { db, schema } from '../db/index.js';
-import { eq, and, gt, sql, inArray } from 'drizzle-orm';
+import { eq, and, gt, inArray } from 'drizzle-orm';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { generateUUID, getExpiryDate } from '../lib/crypto.js';
 import { getFile, getStream } from '../lib/storage.js';
@@ -9,6 +9,10 @@ import { z } from 'zod';
 import { logAudit } from './admin.js';
 import { getClientIp } from '../lib/clientIp.js';
 import { safeContentDisposition } from '../lib/sanitize.js';
+import {
+  consumeLimitedPublicShareAccess,
+  recordUnlimitedPublicShareUnlock,
+} from '../lib/publicShareAccess.js';
 
 const kdfParamsSchema = z
   .object({
@@ -36,20 +40,6 @@ const createPublicShareSchema = z.object({
 });
 
 export async function shareRoutes(app: FastifyInstance): Promise<void> {
-
-  /**
-   * Atomically consume one access for a public share, if allowed.
-   * Returns true when access is granted; false when maxAccess has been reached.
-   */
-  const consumePublicShareAccess = (shareId: number): boolean => {
-    const res = db.run(sql`
-      UPDATE public_shares
-      SET access_count = access_count + 1
-      WHERE id = ${shareId}
-        AND (max_access IS NULL OR access_count < max_access)
-    `);
-    return (res?.changes ?? 0) > 0;
-  };
   
   // ============ GET MY OUTGOING SHARES (Share Management) ============
   app.get('/api/my-shares', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
@@ -281,10 +271,10 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     if (share.maxAccess && (share.accessCount ?? 0) >= share.maxAccess) {
       return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
     }
-    
-    // NOTE: Access is NOT counted here — it is counted via POST /api/public/:token/access
-    // after the user successfully enters the passphrase and decrypts the file.
-    
+
+    // NOTE: Limited shares (maxAccess) consume access on each successful download, not here.
+    // Unlimited shares increment access_count once after passphrase unlock via POST .../access.
+
     // If it's a folder, return folder structure with all files
     if (share.file.isFolder) {
       const children = await getFolderContents(share.file.id, share.file.ownerId);
@@ -333,7 +323,7 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
-  // ============ RECORD PUBLIC SHARE ACCESS (called after passphrase verification) ============
+  // ============ RECORD PUBLIC SHARE UNLOCK (unlimited shares only — analytics) ============
   app.post('/api/public/:token/access', {
     config: {
       rateLimit: { max: 10, timeWindow: '1 minute' },
@@ -352,14 +342,13 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(404).send({ ok: false, msg: 'Link not found or expired' });
     }
 
-    // Check if maxAccess has been reached before consuming
     if (share.maxAccess && (share.accessCount ?? 0) >= share.maxAccess) {
       return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
     }
 
-    const ok = consumePublicShareAccess(share.id);
-    if (!ok) {
-      return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
+    // Limited shares: enforcement is on download via consumeLimitedPublicShareAccess (cannot bypass).
+    if (!share.maxAccess) {
+      recordUnlimitedPublicShareUnlock(share.id);
     }
 
     return { ok: true };
@@ -384,12 +373,14 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     if (!share) {
       return reply.status(404).send({ ok: false, msg: 'Link not found or expired' });
     }
-    
-    // Enforce maxAccess limit but do NOT consume (consumption is done via POST /access)
-    if (share.maxAccess && (share.accessCount ?? 0) >= share.maxAccess) {
-      return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
+
+    if (share.maxAccess) {
+      const granted = consumeLimitedPublicShareAccess(share.id);
+      if (!granted) {
+        return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
+      }
     }
-    
+
     // Check if this is a folder share
     if (!share.file.isFolder) {
       return reply.status(400).send({ ok: false, msg: 'Not a folder share' });
@@ -430,8 +421,6 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     const stream = getStream(file.storagePath);
     reply.header('Content-Type', 'application/octet-stream');
     reply.header('Content-Disposition', safeContentDisposition(file.filename));
-    reply.header('X-Encrypted-Key', file.encryptedKey);
-    reply.header('X-IV', file.iv);
     return reply.send(stream);
   });
 
@@ -454,18 +443,18 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     if (!share || !share.file.storagePath) {
       return reply.status(404).send({ ok: false, msg: 'Link not found or expired' });
     }
-    
-    // Enforce maxAccess limit but do NOT consume
-    if (share.maxAccess && (share.accessCount ?? 0) >= share.maxAccess) {
-      return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
+
+    if (share.maxAccess) {
+      const granted = consumeLimitedPublicShareAccess(share.id);
+      if (!granted) {
+        return reply.status(403).send({ ok: false, msg: 'Link access limit reached' });
+      }
     }
-    
+
     const stream = getStream(share.file.storagePath);
     reply.header('Content-Type', 'application/octet-stream');
     reply.header('Content-Disposition', safeContentDisposition(share.file.filename));
-    reply.header('X-Encrypted-Key', share.file.encryptedKey);
-    reply.header('X-IV', share.file.iv);
-    
+
     return reply.send(stream);
   });
   

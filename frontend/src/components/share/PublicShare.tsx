@@ -66,6 +66,8 @@ export default function PublicShare() {
   const [isUnlocking, setIsUnlocking] = createSignal(false);
   const [unlockError, setUnlockError] = createSignal<string | null>(null);
   const [unlockedKeys, setUnlockedKeys] = createSignal<Record<string, CryptoKey>>({});
+  /** After successful passphrase unlock (even if zero per-file keys unwrapped). */
+  const [shareUnlocked, setShareUnlocked] = createSignal(false);
   const [publicKdf, setPublicKdf] = createSignal<any>(null);
   const [publicItems, setPublicItems] = createSignal<Record<string, { wrappedKey: string; wrappedKeyIv: string }>>({});
   
@@ -120,6 +122,7 @@ export default function PublicShare() {
         return;
       }
 
+      setShareUnlocked(false);
       try {
         type PublicMeta = {
           isFolder?: boolean;
@@ -179,7 +182,7 @@ export default function PublicShare() {
       const iterations = (kdf.params?.iterations as number) || 310000;
       const shareKey = await derivePublicShareKeyPBKDF2(passphrase(), kdf.salt, iterations);
 
-      if (!isFolder()) {
+        if (!isFolder()) {
         const k = kdf.wrappedKey;
         const kiv = kdf.wrappedKeyIv;
         if (!k || !kiv) throw new Error('Missing wrapped key');
@@ -192,6 +195,7 @@ export default function PublicShare() {
           } catch { /* keep raw */ }
         }
         setUnlockedKeys({ [f?.id || '']: fileKey });
+        setShareUnlocked(true);
         if (f && isPreviewable(f.filename)) {
           loadPreviewFromKey(f.id, fileKey, f.filename, f.iv);
         }
@@ -220,11 +224,19 @@ export default function PublicShare() {
         const f = folder();
         if (f) {
           const children = await decryptTree(f.children || []);
-          setFolder({ ...f, children });
+          let rootName = f.filename;
+          const rootKey = keys[f.id];
+          if (rootKey && isEncryptedFilename(f.filename)) {
+            try {
+              rootName = await decryptEncryptedFilename(f.filename, rootKey);
+            } catch { /* keep */ }
+          }
+          setFolder({ ...f, filename: rootName, children });
         }
+        setShareUnlocked(true);
       }
 
-      // Record successful access (view count) AFTER passphrase is verified
+      // Record unlock for analytics (unlimited shares only; limited shares count downloads server-side)
       try {
         await publicRequestJson(`/public/${token}/access`, { method: 'POST' });
       } catch {
@@ -390,8 +402,25 @@ export default function PublicShare() {
     setFolderPath(folderPath().slice(0, index));
   };
 
+  const folderItemDisplayName = (item: FolderItem): string => {
+    const k = unlockedKeys()[item.id];
+    if (item.isFolder) {
+      if (isEncryptedFilename(item.filename) && !k) return 'Encrypted folder';
+      return item.filename;
+    }
+    if (isEncryptedFilename(item.filename) && !k) return 'Encrypted file';
+    return item.filename;
+  };
+
+  const fileExtensionForItem = (item: FolderItem): string => {
+    if (item.isFolder) return '';
+    if (isEncryptedFilename(item.filename) && !unlockedKeys()[item.id]) return '';
+    return getFileExtension(item.filename);
+  };
+
   // Shared folder icon (folder + person) - Drive style. size: 'sm' for header, 'md' default
-  const getSharedFolderIcon = (filename: string, isFolder: boolean, size: 'sm' | 'md' = 'md') => {
+  const getSharedFolderIcon = (item: FolderItem, size: 'sm' | 'md' = 'md') => {
+    const isFolder = item.isFolder;
     const iconCls = size === 'sm' ? 'w-5 h-5' : 'w-10 h-10';
     const badgeCls = size === 'sm' ? 'w-2.5 h-2.5' : 'w-4 h-4';
     if (isFolder) {
@@ -406,7 +435,7 @@ export default function PublicShare() {
         </div>
       );
     }
-    const ext = getFileExtension(filename);
+    const ext = fileExtensionForItem(item);
     const iconColors: Record<string, string> = {
       pdf: 'text-red-500', jpg: 'text-red-500', jpeg: 'text-red-500', png: 'text-red-500', gif: 'text-red-500', webp: 'text-red-500',
       doc: 'text-blue-500', docx: 'text-blue-500', xls: 'text-green-500', xlsx: 'text-green-500',
@@ -495,10 +524,10 @@ export default function PublicShare() {
     return null;
   };
   
-  // Folder list only after unlock when passphrase KDF is present; otherwise the unlock card is primary.
+  // Folder list: legacy (no KDF) always; passphrase shares after successful unlock (even if some keys missing).
   const canBrowseFolder = () => {
     if (!publicKdf()) return true;
-    return Object.keys(unlockedKeys()).length > 0;
+    return shareUnlocked();
   };
   // Single full-page Drive-style layout for all share types (folder + file + loading + error)
   const showFolderView = () =>
@@ -506,6 +535,11 @@ export default function PublicShare() {
   const breadcrumbTitle = () => {
     if (isLoading()) return 'Loading...';
     if (error()) return 'Error';
+    if (publicKdf() && !shareUnlocked()) {
+      if (folder()) return 'Shared folder';
+      if (file()) return 'Encrypted file';
+      return 'Shared';
+    }
     if (folder()) return folder()!.filename;
     if (file()) return file()!.filename;
     return 'Shared';
@@ -560,7 +594,7 @@ export default function PublicShare() {
                             <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
                           </svg>
                         )}
-                        {item.filename}
+                        {folderItemDisplayName(item)}
                       </button>
                     </>
                   )}
@@ -654,7 +688,7 @@ export default function PublicShare() {
           </div>
         </Show>
 
-        <Show when={!isLoading() && !error() && publicKdf() && Object.keys(unlockedKeys()).length === 0}>
+        <Show when={!isLoading() && !error() && publicKdf() && !shareUnlocked()}>
           <div class="max-w-md mx-auto bg-[#1e1e1e] border border-gray-800 rounded-2xl p-5">
             <h2 class="text-lg font-semibold text-white mb-2">Passphrase required</h2>
             <p class="text-gray-400 text-sm mb-4">Enter the passphrase to decrypt this share in your browser.</p>
@@ -705,16 +739,20 @@ export default function PublicShare() {
                       onClick={() => item.isFolder && navigateIntoFolder(item)}
                     >
                       <div class="w-10 h-10 flex items-center justify-center shrink-0">
-                        {getSharedFolderIcon(item.filename, item.isFolder)}
+                        {getSharedFolderIcon(item)}
                       </div>
                       <div class="flex-1 min-w-0">
-                        <p class="text-white truncate">{item.filename}</p>
+                        <p class="text-white truncate">{folderItemDisplayName(item)}</p>
                         <p class="text-gray-500 text-sm">{item.isFolder ? 'Folder' : formatSize(item.fileSize, { unset: '0 B', zero: '0 B' })}</p>
                       </div>
                       {!item.isFolder && (
                         <button
                           onClick={(e) => { e.stopPropagation(); handleFolderFileDownload(item); }}
-                          disabled={downloadingFileId() === item.id}
+                          disabled={
+                            downloadingFileId() === item.id ||
+                            !unlockedKeys()[item.id] ||
+                            !item.iv
+                          }
                           class="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg shrink-0"
                         >
                           {downloadingFileId() === item.id ? (
@@ -733,7 +771,12 @@ export default function PublicShare() {
                             {!item.isFolder && (
                               <button
                                 type="button"
-                                disabled={!!pendingBlobSave() || downloadingFileId() === item.id}
+                                disabled={
+                                  !!pendingBlobSave() ||
+                                  downloadingFileId() === item.id ||
+                                  !unlockedKeys()[item.id] ||
+                                  !item.iv
+                                }
                                 onClick={(e) => { e.stopPropagation(); handleFolderFileDownload(item); setOpenMenuId(null); }}
                                 class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                               >
@@ -758,9 +801,9 @@ export default function PublicShare() {
                     >
                       <div class="flex items-center gap-2 px-3 py-2 min-h-0">
                         <div class="w-6 h-6 flex items-center justify-center shrink-0 overflow-hidden">
-                          {getSharedFolderIcon(item.filename, item.isFolder, 'sm')}
+                          {getSharedFolderIcon(item, 'sm')}
                         </div>
-                        <p class="flex-1 text-sm text-white truncate min-w-0">{item.filename}</p>
+                        <p class="flex-1 text-sm text-white truncate min-w-0">{folderItemDisplayName(item)}</p>
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId() === item.id ? null : item.id); }}
@@ -772,7 +815,7 @@ export default function PublicShare() {
                       </div>
                       <div class="aspect-square bg-[#2a2a2a] flex items-center justify-center p-4">
                         <div class="w-full h-full flex items-center justify-center rounded-lg bg-gray-800/50">
-                          {getSharedFolderIcon(item.filename, item.isFolder, 'md')}
+                          {getSharedFolderIcon(item, 'md')}
                         </div>
                       </div>
                       <Show when={openMenuId() === item.id}>
@@ -780,7 +823,12 @@ export default function PublicShare() {
                           {!item.isFolder && (
                             <button
                               type="button"
-                              disabled={!!pendingBlobSave() || downloadingFileId() === item.id}
+                              disabled={
+                                !!pendingBlobSave() ||
+                                downloadingFileId() === item.id ||
+                                !unlockedKeys()[item.id] ||
+                                !item.iv
+                              }
                               onClick={(e) => { e.stopPropagation(); handleFolderFileDownload(item); setOpenMenuId(null); }}
                               class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                             >

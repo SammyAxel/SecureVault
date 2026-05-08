@@ -1,9 +1,12 @@
 import { mkdir, writeFile, readFile, unlink, stat } from 'fs/promises';
 import { libLogger } from './logger.js';
 import { join, resolve } from 'path';
-import { randomBytes } from 'crypto';
-import { existsSync, createReadStream, readFileSync } from 'fs';
+import { createHash, randomBytes } from 'crypto';
+import { existsSync, createReadStream, createWriteStream, readFileSync } from 'fs';
 import type { ReadStream } from 'fs';
+import { Transform } from 'stream';
+import { pipeline } from 'stream/promises';
+import type { Readable } from 'stream';
 
 export interface StorageResult {
   relativePath: string;
@@ -78,6 +81,52 @@ export async function saveFile(userId: string, buffer: Buffer): Promise<StorageR
     relativePath,
     fullPath,
     size: buffer.length,
+  };
+}
+
+export interface StreamSaveResult extends StorageResult {
+  sha256: string;
+}
+
+/** Stream ciphertext to disk (no full-file RAM buffer). Computes SHA-256 while writing. */
+export async function saveFileStream(userId: string, source: Readable): Promise<StreamSaveResult> {
+  const now = new Date();
+  const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const filename = randomBytes(16).toString('hex') + '.enc';
+
+  const relativePath = `${userId}/${yearMonth}/${filename}`;
+  const dirPath = join(STORAGE_ROOT, String(userId), yearMonth);
+  const fullPath = join(dirPath, filename);
+
+  await mkdir(dirPath, { recursive: true });
+
+  const hash = createHash('sha256');
+  let size = 0;
+  const monitor = new Transform({
+    transform(chunk: Buffer, _enc, cb) {
+      size += chunk.length;
+      hash.update(chunk);
+      cb(null, chunk);
+    },
+  });
+
+  const writeStream = createWriteStream(fullPath);
+  try {
+    await pipeline(source, monitor, writeStream);
+  } catch (err) {
+    try {
+      await unlink(fullPath);
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
+
+  return {
+    relativePath,
+    fullPath,
+    size,
+    sha256: hash.digest('hex'),
   };
 }
 

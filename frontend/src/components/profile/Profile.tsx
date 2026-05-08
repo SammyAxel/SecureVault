@@ -8,6 +8,15 @@ import DeviceLinkModal from '../DeviceLinkModal';
 import {
   generateKeyBundle,
   downloadKeyBundle,
+  getCurrentKeys,
+  importEncryptionPrivateKey,
+  importEncryptionPublicKey,
+  generateFileKey,
+  encryptFilename,
+  wrapKey,
+  unwrapKey,
+  isEncryptedFilename,
+  arrayBufferToBase64,
 } from '../../lib/crypto';
 import { awaitMinElapsed, MIN_CONTENT_LOAD_MS, MIN_FORM_SUBMIT_MS } from '../../lib/motion';
 import { t, getLocale, setStoredLocale, type Locale } from '../../lib/i18n';
@@ -462,6 +471,75 @@ function SecurityTab() {
   const [isLoading, setIsLoading] = createSignal(false);
   const [disableCode, setDisableCode] = createSignal('');
   const [isGeneratingKeys, setIsGeneratingKeys] = createSignal(false);
+  const [repairingVault, setRepairingVault] = createSignal(false);
+
+  const repairVaultPrivacy = async () => {
+    const confirmed = await openConfirm({
+      title: 'Repair vault privacy?',
+      message:
+        'This will encrypt any plaintext file/folder names still stored on the server, and fix folders that are missing encryption metadata (needed for public folder links). Items that are already encrypted but missing keys must be fixed manually. Continue?',
+      confirmText: 'Run repair',
+      type: 'warning',
+    });
+    if (!confirmed) return;
+
+    const keys = getCurrentKeys();
+    if (!keys) {
+      toast.error('Keys not loaded. Sign in again with your key file.');
+      return;
+    }
+
+    setRepairingVault(true);
+    let updated = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    try {
+      const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
+      const publicKey = await importEncryptionPublicKey(keys.encryptionPublicKey);
+      const { files } = await api.listFiles(undefined, undefined, true);
+
+      for (const f of files) {
+        try {
+          if (f.isFolder && (!f.encryptedKey?.trim() || !f.iv?.trim())) {
+            const plain = f.filename;
+            if (isEncryptedFilename(plain)) {
+              skipped++;
+              continue;
+            }
+            const folderKey = await generateFileKey();
+            const encName = await encryptFilename(plain, folderKey);
+            const wrapped = await wrapKey(folderKey, publicKey);
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            await api.patchFolderCryptoMetadata(f.id, {
+              encryptedKey: wrapped,
+              iv: arrayBufferToBase64(iv),
+              filename: encName,
+            });
+            updated++;
+            continue;
+          }
+
+          if (!f.isFolder && !isEncryptedFilename(f.filename)) {
+            const fileKey = await unwrapKey(f.encryptedKey, privateKey);
+            const encName = await encryptFilename(f.filename, fileKey);
+            await api.renameFile(f.id, { encryptedName: encName });
+            updated++;
+          }
+        } catch {
+          failed++;
+        }
+      }
+
+      toast.success(
+        `Repair finished: ${updated} updated, ${skipped} skipped (encrypted name but broken metadata — fix manually), ${failed} failed`
+      );
+    } catch (err: any) {
+      toast.error(err?.message || 'Repair failed');
+    } finally {
+      setRepairingVault(false);
+    }
+  };
 
   const setup2FA = async () => {
     setIsLoading(true);
@@ -553,6 +631,23 @@ function SecurityTab() {
           class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors text-sm font-medium"
         >
           Show QR code
+        </button>
+      </div>
+
+      <div class="bg-gray-800 rounded-xl p-6">
+        <h3 class="text-lg font-semibold mb-1">Vault privacy (filenames)</h3>
+        <p class="text-gray-400 text-sm mb-4">
+          Older items may still have readable names on the server, or folders without proper encryption metadata (which
+          breaks public folder links). Run this once to encrypt plaintext names and repair folder keys using your
+          current key file.
+        </p>
+        <button
+          type="button"
+          onClick={() => void repairVaultPrivacy()}
+          disabled={repairingVault()}
+          class="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-60 text-white rounded-lg transition-colors text-sm font-medium"
+        >
+          {repairingVault() ? 'Repairing…' : 'Encrypt names & repair folders'}
         </button>
       </div>
 
