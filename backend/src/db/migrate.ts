@@ -56,6 +56,7 @@ db.exec(`
     owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     encrypted_key TEXT NOT NULL,
     iv TEXT NOT NULL,
+    key_signature TEXT,
     storage_path TEXT,
     file_size INTEGER DEFAULT 0,
     is_folder INTEGER DEFAULT 0,
@@ -279,6 +280,12 @@ if (!hasColumn('files', 'demo_session_id')) {
     libLogger.error({ err: error }, 'Migration failed (demo_session_id)');
     throw error;
   }
+}
+
+if (!hasColumn('files', 'key_signature')) {
+  runMigration('files.key_signature', () => {
+    db.exec('ALTER TABLE files ADD COLUMN key_signature TEXT');
+  });
 }
 
 libLogger.info('All database migrations completed');

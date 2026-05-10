@@ -37,6 +37,10 @@ import {
   encryptFilename,
   decryptFilename,
   isEncryptedFilename,
+  importSigningPrivateKey,
+  importSigningPublicKey,
+  signWrappedKey,
+  verifyWrappedKey,
 } from '../../lib/crypto';
 
 // Helper to get MIME type from filename
@@ -559,6 +563,10 @@ export default function Dashboard(props: DashboardProps) {
         const publicKey = await importEncryptionPublicKey(keys.encryptionPublicKey);
         const wrappedKey = await wrapKey(key, publicKey);
 
+        // Sign wrapped key and IV
+        const signingPrivateKey = await importSigningPrivateKey(keys.signingPrivateKey);
+        const keySignature = await signWrappedKey(wrappedKey, arrayBufferToBase64(iv), signingPrivateKey);
+
         setUploadProgress(`Uploading ${file.name}...`);
 
         // Upload
@@ -569,7 +577,8 @@ export default function Dashboard(props: DashboardProps) {
           arrayBufferToBase64(iv),
           fileHash,
           parentId || undefined,
-          encName
+          encName,
+          keySignature
         );
 
         setUploadProgress(null);
@@ -606,9 +615,19 @@ export default function Dashboard(props: DashboardProps) {
       setUploadProgress(`Downloading ${file.filename}...`);
 
       // Download encrypted file
-      const { data, encryptedKey, iv } = await api.downloadFile(file.id);
+      const { data, encryptedKey, iv, keySignature } = await api.downloadFile(file.id);
 
       setUploadProgress(`Decrypting ${file.filename}...`);
+
+      // Verify signature
+      if (!keySignature) {
+        throw new Error('Key signature is missing. File may have been tampered with.');
+      }
+      const signingPublicKey = await importSigningPublicKey(keys.signingPublicKey);
+      const isValid = await verifyWrappedKey(encryptedKey, iv, keySignature, signingPublicKey);
+      if (!isValid) {
+        throw new Error('Invalid key signature. Key Insertion Attack detected!');
+      }
 
       // Unwrap key
       const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
@@ -647,7 +666,17 @@ export default function Dashboard(props: DashboardProps) {
       setUploadProgress(`Opening ${file.filename}...`);
 
       // Download encrypted file
-      const { data, encryptedKey, iv } = await api.downloadFile(file.id);
+      const { data, encryptedKey, iv, keySignature } = await api.downloadFile(file.id);
+
+      // Verify signature
+      if (!keySignature) {
+        throw new Error('Key signature is missing. File may have been tampered with.');
+      }
+      const signingPublicKey = await importSigningPublicKey(keys.signingPublicKey);
+      const isValid = await verifyWrappedKey(encryptedKey, iv, keySignature, signingPublicKey);
+      if (!isValid) {
+        throw new Error('Invalid key signature. Key Insertion Attack detected!');
+      }
 
       // Unwrap key
       const privateKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);

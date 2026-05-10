@@ -211,6 +211,29 @@ export async function unwrapKey(wrappedKey: string, privateKey: CryptoKey): Prom
   );
 }
 
+export async function signWrappedKey(wrappedKey: string, iv: string, privateKey: CryptoKey): Promise<string> {
+  const payload = `${wrappedKey}.${iv}`;
+  const data = new TextEncoder().encode(payload);
+  const signature = await crypto.subtle.sign(
+    { name: 'ECDSA', hash: { name: 'SHA-256' } },
+    privateKey,
+    data
+  );
+  return arrayBufferToBase64(signature);
+}
+
+export async function verifyWrappedKey(wrappedKey: string, iv: string, signature: string, publicKey: CryptoKey): Promise<boolean> {
+  const payload = `${wrappedKey}.${iv}`;
+  const data = new TextEncoder().encode(payload);
+  const signatureBuffer = base64ToArrayBuffer(signature);
+  return crypto.subtle.verify(
+    { name: 'ECDSA', hash: { name: 'SHA-256' } },
+    publicKey,
+    signatureBuffer,
+    data
+  );
+}
+
 // ============ PASSPHRASE PUBLIC SHARE (PBKDF2 -> AES-GCM) ============
 
 export type PublicShareKdfParams = {

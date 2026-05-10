@@ -1,0 +1,1 @@
+ALTER TABLE `files` ADD `key_signature` text;

@@ -44,6 +44,7 @@ export const files = sqliteTable('files', {
   ownerId: text('owner_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   encryptedKey: text('encrypted_key').notNull(),
   iv: text('iv').notNull(),
+  keySignature: text('key_signature'), // ECDSA signature of wrappedKey + iv
   storagePath: text('storage_path'), // Path on filesystem (null for folders)
   fileSize: integer('file_size').default(0),
   isFolder: integer('is_folder', { mode: 'boolean' }).default(false),

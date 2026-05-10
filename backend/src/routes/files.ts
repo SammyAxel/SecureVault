@@ -48,6 +48,7 @@ const createFolderSchema = z.object({
   parentId: z.string().uuid().optional().nullable(),
   encryptedKey: z.string().min(1),
   iv: z.string().min(1),
+  keySignature: z.string().optional(),
 });
 
 const renameSchema = z
@@ -63,6 +64,7 @@ const folderCryptoMetadataSchema = z.object({
   encryptedKey: z.string().min(1),
   iv: z.string().min(1),
   filename: z.string().min(1).max(4096).optional(),
+  keySignature: z.string().optional(),
 });
 
 const moveSchema = z.object({
@@ -127,6 +129,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       createdAt: f.createdAt,
       encryptedKey: f.encryptedKey,
       iv: f.iv,
+      keySignature: f.keySignature,
+      ownerId: f.ownerId,
     });
 
     if (all === 'true') {
@@ -213,6 +217,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         createdAt: file.createdAt,
         encryptedKey: file.encryptedKey,
         iv: file.iv,
+        keySignature: file.keySignature,
+        ownerId: file.ownerId,
       },
       parentPath,
     };
@@ -262,6 +268,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       const fileHashField = fields.file_hash?.value?.trim().toLowerCase();
       const parentId = fields.parent_id?.value || null;
       const encryptedFilename = fields.encrypted_filename?.value;
+      const keySignature = fields.key_signature?.value;
 
       if (!encryptedKey || !iv) {
         await deleteFile(relativePath);
@@ -342,6 +349,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         ownerId: user.id,
         encryptedKey,
         iv,
+        keySignature,
         storagePath: relativePath,
         fileSize,
         parentId,
@@ -397,7 +405,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ ok: false, msg: 'Invalid request' });
     }
     
-    const { name, parentId, encryptedKey: folderKey, iv: folderIv } = body.data;
+    const { name, parentId, encryptedKey: folderKey, iv: folderIv, keySignature } = body.data;
     
     const folderId = generateUUID();
     const folderUid = generateUID();
@@ -408,6 +416,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       ownerId: user.id,
       encryptedKey: folderKey,
       iv: folderIv,
+      keySignature,
       isFolder: true,
       parentId: parentId || null,
       demoSessionId: demoSessionFilter(request),
@@ -469,6 +478,9 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     reply.header('Content-Disposition', safeContentDisposition(file.filename));
     reply.header('X-Encrypted-Key', encryptedKey);
     reply.header('X-IV', file.iv);
+    if (file.keySignature) {
+      reply.header('X-Key-Signature', file.keySignature);
+    }
     
     return reply.send(stream);
   });
@@ -630,6 +642,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         deletedAt: f.deletedAt,
         encryptedKey: f.encryptedKey,
         iv: f.iv,
+        keySignature: f.keySignature,
+        ownerId: f.ownerId,
       })),
     };
   });
@@ -761,6 +775,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       .set({
         encryptedKey: body.data.encryptedKey,
         iv: body.data.iv,
+        ...(body.data.keySignature !== undefined ? { keySignature: body.data.keySignature } : {}),
         ...(body.data.filename !== undefined ? { filename: body.data.filename } : {}),
       })
       .where(eq(schema.files.id, fileId));

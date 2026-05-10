@@ -29,6 +29,13 @@
       "when": 1777051106364,
       "tag": "0004_session_token_rotated_at",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1778432453796,
+      "tag": "0005_cooing_guardian",
+      "breakpoints": true
     }
   ]
 }

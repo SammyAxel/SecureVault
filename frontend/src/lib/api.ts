@@ -405,6 +405,8 @@ export interface FileItem {
   deletedAt?: string;
   encryptedKey: string;
   iv: string;
+  keySignature?: string;
+  ownerId?: string;
 }
 
 /** List folder contents. Pass `all=true` to return every file (for client-side search). */
@@ -433,7 +435,8 @@ export async function uploadFile(
   iv: string,
   fileHash: string,
   parentId?: string,
-  encryptedFilename?: string
+  encryptedFilename?: string,
+  keySignature?: string
 ) {
   const formData = new FormData();
   formData.append('file', new Blob([encryptedData]), file.name);
@@ -446,6 +449,9 @@ export async function uploadFile(
   if (encryptedFilename) {
     formData.append('encrypted_filename', encryptedFilename);
   }
+  if (keySignature) {
+    formData.append('key_signature', keySignature);
+  }
   
   return request<{ ok: boolean; fileId: string }>('/upload', {
     method: 'POST',
@@ -457,11 +463,12 @@ export async function createFolder(
   name: string,
   parentId?: string,
   encryptedKey?: string,
-  iv?: string
+  iv?: string,
+  keySignature?: string
 ) {
   return request<{ ok: boolean; folderId: string }>('/folders', {
     method: 'POST',
-    body: JSON.stringify({ name, parentId, encryptedKey, iv }),
+    body: JSON.stringify({ name, parentId, encryptedKey, iv, keySignature }),
   });
 }
 
@@ -469,6 +476,7 @@ export async function downloadFile(fileId: string): Promise<{
   data: ArrayBuffer;
   encryptedKey: string;
   iv: string;
+  keySignature?: string;
   filename: string;
 }> {
   const response = await fetch(`${API_BASE}/files/${fileId}/download`, {
@@ -484,6 +492,7 @@ export async function downloadFile(fileId: string): Promise<{
     data: await response.arrayBuffer(),
     encryptedKey: response.headers.get('X-Encrypted-Key') || '',
     iv: response.headers.get('X-IV') || '',
+    keySignature: response.headers.get('X-Key-Signature') || undefined,
     filename: response.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] || 'download',
   };
 }
