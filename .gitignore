@@ -56,6 +56,14 @@ docker-compose.override.yml
 # Cursor (AI editor artifacts)
 .cursor/plans/
 
+# Claude Code / OpenWolf (AI assistant artifacts — local only)
+.claude/
+.wolf/
+CLAUDE.md
+
+# Playwright MCP browser snapshots (local only)
+.playwright-mcp/
+
 # OS
 .DS_Store
 Thumbs.db

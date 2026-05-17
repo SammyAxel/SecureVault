@@ -17,7 +17,7 @@ import Setup from './components/Setup';
 import ToastContainer from './components/Toast';
 import ConfirmModal from './components/ConfirmModal';
 import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
-import { initTheme } from './lib/theme';
+import { initTheme, themeMode, switchTheme, resolvedTheme } from './lib/theme';
 import { initI18n } from './lib/i18n';
 import { isTypingInField } from './lib/keyboardShortcuts';
 
@@ -345,8 +345,8 @@ function AppContent() {
           </Show>
 
           {/* Header */}
-          <header class="bg-gray-800 border-b border-gray-700">
-            <div class="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-4 flex items-center justify-between gap-2 flex-wrap">
+          <header class="bg-gray-800/95 border-b border-gray-700/80 backdrop-blur-sm sticky top-0 z-40">
+            <div class="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-3.5 flex items-center justify-between gap-2 flex-wrap">
               <div class="flex items-center gap-1 sm:gap-2 min-w-0 shrink-0">
                 <Show when={user() && !isAdminPage() && !isProfilePage()}>
                   <button
@@ -519,6 +519,31 @@ function AppContent() {
                   </span>
                 </div>
               </Show>
+            {/* Theme toggle — always visible regardless of auth state */}
+            <button
+              type="button"
+              class="p-2 rounded-lg text-gray-400 hover:bg-gray-700 hover:text-white shrink-0"
+              onClick={() => {
+                const modes = ['light', 'dark', 'system'] as const;
+                const cur = themeMode();
+                const next = modes[(modes.indexOf(cur) + 1) % modes.length];
+                switchTheme(next);
+              }}
+              title={`Appearance: ${themeMode()} — click to cycle`}
+              aria-label="Toggle theme"
+            >
+              {resolvedTheme(themeMode()) === 'dark' ? (
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z" />
+                </svg>
+              ) : (
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M12 3v1m0 16v1m8.66-13H20m-16 0H2.34M18.36 5.64l-.7.7M6.34 17.66l-.7.7M18.36 18.36l-.7-.7M6.34 6.34l-.7-.7M12 8a4 4 0 100 8 4 4 0 000-8z" />
+                </svg>
+              )}
+            </button>
             </div>
           </header>
 

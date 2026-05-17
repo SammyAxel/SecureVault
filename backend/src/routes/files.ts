@@ -188,8 +188,8 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     if (!file) {
       return reply.status(404).send({ ok: false, msg: 'File not found' });
     }
-    
-    // Check ownership or share access
+
+    // Check ownership or share access — always 404 to avoid revealing file existence
     if (file.ownerId !== user.id) {
       const share = await db.query.fileShares.findFirst({
         where: and(
@@ -197,9 +197,9 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
           eq(schema.fileShares.recipientId, user.id)
         ),
       });
-      
+
       if (!share) {
-        return reply.status(403).send({ ok: false, msg: 'Access denied' });
+        return reply.status(404).send({ ok: false, msg: 'File not found' });
       }
     }
     
@@ -273,6 +273,21 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       if (!encryptedKey || !iv) {
         await deleteFile(relativePath);
         return reply.status(400).send({ ok: false, msg: 'Missing encryption metadata' });
+      }
+
+      if (parentId) {
+        const parentFolder = await db.query.files.findFirst({
+          where: and(
+            eq(schema.files.id, parentId),
+            eq(schema.files.ownerId, user.id),
+            eq(schema.files.isFolder, true),
+            eq(schema.files.isDeleted, false)
+          ),
+        });
+        if (!parentFolder) {
+          await deleteFile(relativePath);
+          return reply.status(404).send({ ok: false, msg: 'Parent folder not found' });
+        }
       }
 
       if (fileHashField && fileHashField !== streamSha256) {
@@ -406,7 +421,21 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     }
     
     const { name, parentId, encryptedKey: folderKey, iv: folderIv, keySignature } = body.data;
-    
+
+    if (parentId) {
+      const parentFolder = await db.query.files.findFirst({
+        where: and(
+          eq(schema.files.id, parentId),
+          eq(schema.files.ownerId, user.id),
+          eq(schema.files.isFolder, true),
+          eq(schema.files.isDeleted, false)
+        ),
+      });
+      if (!parentFolder) {
+        return reply.status(404).send({ ok: false, msg: 'Parent folder not found' });
+      }
+    }
+
     const folderId = generateUUID();
     const folderUid = generateUID();
     await db.insert(schema.files).values({
@@ -445,13 +474,13 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(404).send({ ok: false, msg: 'File not found' });
     }
     
-    // Check if user owns the file or has share access
+    // Check if user owns the file or has share access — always 404 to avoid revealing file existence
     let encryptedKey = file.encryptedKey;
-    
+
     if (file.ownerId !== user.id) {
       // Trashed files are only accessible by their owner, not shared recipients
       if (file.isDeleted) {
-        return reply.status(403).send({ ok: false, msg: 'Access denied' });
+        return reply.status(404).send({ ok: false, msg: 'File not found' });
       }
       const share = await db.query.fileShares.findFirst({
         where: and(
@@ -459,11 +488,11 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
           eq(schema.fileShares.recipientId, user.id)
         ),
       });
-      
+
       if (!share) {
-        return reply.status(403).send({ ok: false, msg: 'Access denied' });
+        return reply.status(404).send({ ok: false, msg: 'File not found' });
       }
-      
+
       encryptedKey = share.encryptedKey;
     }
     
@@ -830,9 +859,12 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
       }
       
       // Check for circular reference (can't move a folder into its descendant)
+      // Depth cap prevents DoS via deeply nested trees (same limit as folder recursion elsewhere)
       if (file.isFolder) {
         let currentParentId: string | null = parentId;
-        while (currentParentId) {
+        let depth = 0;
+        while (currentParentId && depth < 20) {
+          depth++;
           if (currentParentId === fileId) {
             return reply.status(400).send({ ok: false, msg: 'Cannot move folder into its descendant' });
           }

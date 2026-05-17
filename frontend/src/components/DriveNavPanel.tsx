@@ -54,9 +54,9 @@ export default function DriveNavPanel(props: {
 
   return (
     <>
-      <div class="bg-gray-900/40 border border-gray-800 rounded-xl p-3">
-        <div class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1 mb-2">Drive</div>
-        <nav class="space-y-1" aria-label="Drive sections">
+      <div class="bg-gray-900/40 border border-gray-800/60 rounded-xl p-2.5">
+        <div class="text-[10px] font-semibold text-gray-500 uppercase tracking-widest px-1.5 mb-2 pt-0.5">Drive</div>
+        <nav class="space-y-0.5" aria-label="Drive sections">
           <NavItem
             id="home"
             label="Home"
@@ -100,13 +100,13 @@ export default function DriveNavPanel(props: {
       </div>
 
       <Show when={user()}>
-        <div class="mt-4 bg-gray-900/40 border border-gray-800 rounded-xl p-4">
+        <div class="mt-3 bg-gray-900/40 border border-gray-800/60 rounded-xl p-3.5">
           <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Storage</span>
-            <span class="text-xs text-gray-400">{storagePercent()}%</span>
+            <span class="text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Storage</span>
+            <span class="text-xs text-gray-400 font-medium">{storagePercent()}%</span>
           </div>
           <div
-            class="w-full bg-gray-800 rounded-full h-2 overflow-hidden"
+            class="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden"
             role="progressbar"
             aria-valuenow={String(storagePercent())}
             aria-valuemin="0"

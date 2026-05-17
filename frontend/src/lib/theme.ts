@@ -1,3 +1,5 @@
+import { createSignal } from 'solid-js';
+
 export type ThemeMode = 'dark' | 'light' | 'system';
 
 const STORAGE_KEY = 'sv_theme_mode';
@@ -20,12 +22,22 @@ export function resolvedTheme(mode: ThemeMode): Exclude<ThemeMode, 'system'> {
   return prefersDark ? 'dark' : 'light';
 }
 
+// Module-level reactive signal — import in any component for reactive reads
+const [_themeMode, _setThemeMode] = createSignal<ThemeMode>('system');
+export const themeMode = _themeMode;
+
 export function applyTheme(mode: ThemeMode): void {
   if (typeof document === 'undefined') return;
+  _setThemeMode(mode);
   const theme = resolvedTheme(mode);
   document.documentElement.setAttribute('data-theme', theme);
-  // Helps form controls / scrollbars match theme.
   document.documentElement.style.colorScheme = theme;
+}
+
+/** Switch theme, persist to localStorage, and update the DOM. */
+export function switchTheme(mode: ThemeMode): void {
+  setStoredThemeMode(mode);
+  applyTheme(mode);
 }
 
 export function initTheme(): void {

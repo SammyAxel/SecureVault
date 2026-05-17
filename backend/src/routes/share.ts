@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { db, schema } from '../db/index.js';
-import { eq, and, gt, inArray } from 'drizzle-orm';
+import { eq, and, gt, inArray, sql } from 'drizzle-orm';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { generateUUID, getExpiryDate } from '../lib/crypto.js';
 import { getFile, getStream } from '../lib/storage.js';
@@ -209,8 +209,12 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     };
   });
   
-  // Helper function to recursively get all files in a folder
-  async function getFolderContents(folderId: string, ownerId: string): Promise<any[]> {
+  const MAX_FOLDER_DEPTH = 20;
+
+  // Helper function to recursively get all files in a folder (depth-limited)
+  async function getFolderContents(folderId: string, ownerId: string, depth = 0): Promise<any[]> {
+    if (depth >= MAX_FOLDER_DEPTH) return [];
+
     const items = await db.query.files.findMany({
       where: and(
         eq(schema.files.parentId, folderId),
@@ -218,13 +222,12 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
         eq(schema.files.isDeleted, false)
       ),
     });
-    
+
     const result: any[] = [];
-    
+
     for (const item of items) {
       if (item.isFolder) {
-        // Recursively get folder contents
-        const children = await getFolderContents(item.id, ownerId);
+        const children = await getFolderContents(item.id, ownerId, depth + 1);
         result.push({
           id: item.id,
           filename: item.filename,
@@ -244,8 +247,22 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
         });
       }
     }
-    
+
     return result;
+  }
+
+  // Check if a file is within the subtree of a given folder using a single recursive CTE
+  function isFileInFolder(fileId: string, folderId: string): boolean {
+    const rows = db.all(sql`
+      WITH RECURSIVE ancestors AS (
+        SELECT parent_id FROM files WHERE id = ${fileId}
+        UNION ALL
+        SELECT f.parent_id FROM files f INNER JOIN ancestors a ON f.id = a.parent_id
+        WHERE a.parent_id IS NOT NULL
+      )
+      SELECT 1 FROM ancestors WHERE parent_id = ${folderId} LIMIT 1
+    `) as unknown[];
+    return rows.length > 0;
   }
   
   // ============ ACCESS PUBLIC SHARE ============
@@ -399,23 +416,10 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(404).send({ ok: false, msg: 'File not found' });
     }
     
-    // Verify the file is within the shared folder (check ancestry)
-    let currentParentId = file.parentId;
-    let isInFolder = false;
-    
-    while (currentParentId) {
-      if (currentParentId === share.file.id) {
-        isInFolder = true;
-        break;
-      }
-      const parent = await db.query.files.findFirst({
-        where: eq(schema.files.id, currentParentId),
-      });
-      currentParentId = parent?.parentId || null;
-    }
-    
-    if (!isInFolder) {
-      return reply.status(403).send({ ok: false, msg: 'File not in shared folder' });
+    // Verify the file is within the shared folder (single recursive CTE — no N+1)
+    // Return 404 (not 403) so the existence of unrelated files is not revealed
+    if (!isFileInFolder(file.id, share.file.id)) {
+      return reply.status(404).send({ ok: false, msg: 'File not found' });
     }
     
     const stream = getStream(file.storagePath);
@@ -471,10 +475,21 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     if (!share || share.file.ownerId !== user.id) {
       return reply.status(404).send({ ok: false, msg: 'Share not found' });
     }
-    
+
     await db.delete(schema.publicShares)
       .where(eq(schema.publicShares.id, share.id));
-    
+
+    await logAudit(
+      user.id,
+      user.username,
+      'REVOKE_SHARE',
+      share.file.isFolder ? 'FOLDER' : 'FILE',
+      share.fileId,
+      { filename: share.file.filename, token: share.token },
+      getClientIp(request),
+      request.headers['user-agent']
+    );
+
     return { ok: true };
   });
 }

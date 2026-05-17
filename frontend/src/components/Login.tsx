@@ -154,18 +154,34 @@ export default function Login(props: LoginProps) {
 
   return (
     <div class="max-w-md mx-auto mt-8 sm:mt-16 px-3 sm:px-0">
-      <div class="bg-gray-800 rounded-xl p-4 sm:p-8 shadow-xl animate-sv-rise">
-        <h2 class="text-xl sm:text-2xl font-bold text-center mb-6">Welcome Back</h2>
-        
+      {/* Gradient border wrapper */}
+      <div class="p-px rounded-2xl bg-gradient-to-br from-primary-500/40 via-primary-700/10 to-primary-500/20 shadow-vault-float animate-sv-rise">
+      <div class="bg-gray-800 rounded-2xl p-6 sm:p-8">
+
+        {/* Header */}
+        <div class="flex flex-col items-center mb-7">
+          <div class="w-14 h-14 rounded-2xl bg-primary-600/20 ring-1 ring-primary-500/30 flex items-center justify-center mb-4">
+            <svg class="w-7 h-7 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          </div>
+          <h2 class="text-xl sm:text-2xl font-bold text-white">Welcome back</h2>
+          <p class="text-sm text-gray-400 mt-1">Sign in to your vault</p>
+        </div>
+
         {error() && (
-          <div class="bg-red-500/20 border border-red-500 text-red-300 rounded-lg p-3 mb-4">
-            {error()}
+          <div class="bg-red-500/10 border border-red-500/40 text-red-300 rounded-xl p-3 mb-5 flex items-start gap-2">
+            <svg class="w-4 h-4 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span class="text-sm">{error()}</span>
           </div>
         )}
 
         <form onSubmit={requires2FA() && challengeData() ? handleSubmit2FA : handleLogin}>
           <div class="mb-4">
-            <label for="login-username" class="block text-gray-400 text-sm mb-2">
+            <label for="login-username" class="block text-gray-400 text-xs font-medium uppercase tracking-wider mb-1.5">
               Username
             </label>
             <input
@@ -173,7 +189,7 @@ export default function Login(props: LoginProps) {
               type="text"
               value={username()}
               onInput={(e) => setUsername(e.currentTarget.value)}
-              class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500"
+              class="w-full bg-gray-700/60 border border-gray-600 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/60 focus:border-primary-500/60 placeholder-gray-500"
               placeholder="Enter your username"
               autocomplete="username"
               required
@@ -184,7 +200,7 @@ export default function Login(props: LoginProps) {
           </div>
 
           <div class="mb-4">
-            <label for="login-keyfile" class="block text-gray-400 text-sm mb-2">
+            <label for="login-keyfile" class="block text-gray-400 text-xs font-medium uppercase tracking-wider mb-1.5">
               Key File (keys.json)
             </label>
             <input
@@ -192,7 +208,7 @@ export default function Login(props: LoginProps) {
               type="file"
               accept=".json"
               onChange={handleKeyFileChange}
-              class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-primary-600 file:text-white file:cursor-pointer"
+              class="w-full bg-gray-700/60 border border-gray-600 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/60 focus:border-primary-500/60 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-primary-600 file:text-white file:cursor-pointer"
               required
               disabled={requires2FA() && !!challengeData()}
             />
@@ -209,7 +225,7 @@ export default function Login(props: LoginProps) {
           {requires2FA() && challengeData() && (
             <>
               <div class="mb-4">
-                <label for="login-totp" class="block text-gray-400 text-sm mb-2">
+                <label for="login-totp" class="block text-gray-400 text-xs font-medium uppercase tracking-wider mb-1.5">
                   2FA Code
                 </label>
                 <input
@@ -219,7 +235,7 @@ export default function Login(props: LoginProps) {
                   autocomplete="one-time-code"
                   value={totp()}
                   onInput={(e) => setTotp(e.currentTarget.value)}
-                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500 text-center text-2xl tracking-widest"
+                  class="w-full bg-gray-700/60 border border-gray-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-primary-500/60 focus:border-primary-500/60 text-center text-2xl tracking-[0.4em] font-mono"
                   placeholder="000000"
                   maxLength={6}
                   required
@@ -248,7 +264,7 @@ export default function Login(props: LoginProps) {
           <button
             type="submit"
             disabled={isLoading()}
-            class="w-full bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 text-white font-medium py-3 rounded-lg transition-colors"
+            class="w-full bg-primary-600 hover:bg-primary-500 disabled:bg-gray-600 disabled:opacity-60 text-white font-semibold py-3 rounded-xl transition-all shadow-vault-glow hover:shadow-none"
           >
             {isLoading() ? (
               <span class="flex items-center justify-center gap-2">
@@ -269,7 +285,7 @@ export default function Login(props: LoginProps) {
               <button
                 type="button"
                 onClick={() => props.onGotoQrLogin?.()}
-                class="text-primary-400 hover:text-primary-300"
+                class="text-primary-400 hover:text-primary-300 font-medium"
               >
                 Log in with QR link
               </button>
@@ -279,12 +295,12 @@ export default function Login(props: LoginProps) {
             </p>
           </Show>
           <Show when={!props.isDemoMode}>
-            <p class="text-gray-400">
+            <p class="text-gray-400 text-sm">
               Don't have an account?{' '}
               <button
                 type="button"
                 onClick={props.onSwitchToRegister}
-                class="text-primary-400 hover:text-primary-300"
+                class="text-primary-400 hover:text-primary-300 font-medium"
               >
                 Register
               </button>
@@ -292,6 +308,7 @@ export default function Login(props: LoginProps) {
           </Show>
         </div>
       </div>
+      </div>{/* end gradient wrapper */}
 
       <Show when={props.isDemoMode}>
         <div class="mt-6 flex flex-col items-center gap-2">
