@@ -623,6 +623,31 @@ export async function revokeUserShare(fileId: string, recipientId: string) {
   });
 }
 
+export interface SharedWithMeItem {
+  shareId: number;
+  fileId: string;
+  filename: string;
+  fileSize: number;
+  isFolder: boolean;
+  encryptedKey: string;
+  iv: string;
+  parentId: string | null;
+  ownerId: string;
+  ownerUsername: string;
+  sharedAt: string;
+}
+
+export async function getSharedWithMe() {
+  return request<{ ok: boolean; items: SharedWithMeItem[] }>('/shared-with-me');
+}
+
+export async function createUserShare(fileId: string, recipientUsername: string, encryptedKey: string) {
+  return request<{ ok: boolean }>('/share/user', {
+    method: 'POST',
+    body: JSON.stringify({ fileId, recipientUsername, encryptedKey }),
+  });
+}
+
 // ============ FILE MANAGEMENT ============
 
 export async function renameFile(

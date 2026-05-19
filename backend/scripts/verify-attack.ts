@@ -36,7 +36,7 @@ async function run() {
 
   // 1. Ambil data korban
   const victim = await db.query.users.findFirst({
-    where: eq(users.username, 'adminkoko'),
+    where: eq(users.username, 'admin1'),
   });
   if (!victim) {
     console.error('❌ User adminkoko tidak ditemukan');

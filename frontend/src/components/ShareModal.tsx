@@ -4,7 +4,9 @@ import type { FileItem } from '../lib/api';
 import {
   getCurrentKeys,
   importEncryptionPrivateKey,
+  importEncryptionPublicKey,
   unwrapKey,
+  wrapKey,
   derivePublicShareKeyPBKDF2,
   generatePublicShareSaltB64,
   wrapFileKeyForPublicShare,
@@ -17,8 +19,12 @@ interface ShareModalProps {
 }
 
 type ShareType = 'permanent' | 'days' | 'views';
+type ModalTab = 'public' | 'user';
 
 export default function ShareModal(props: ShareModalProps) {
+  const [modalTab, setModalTab] = createSignal<ModalTab>('public');
+
+  // Public link state
   const [shareType, setShareType] = createSignal<ShareType>('permanent');
   const [days, setDays] = createSignal(7);
   const [maxViews, setMaxViews] = createSignal(10);
@@ -28,6 +34,12 @@ export default function ShareModal(props: ShareModalProps) {
   const [copied, setCopied] = createSignal(false);
   const [passphrase, setPassphrase] = createSignal('');
   const [passphraseConfirm, setPassphraseConfirm] = createSignal('');
+
+  // User share state
+  const [userShareUsername, setUserShareUsername] = createSignal('');
+  const [userShareLoading, setUserShareLoading] = createSignal(false);
+  const [userShareError, setUserShareError] = createSignal('');
+  const [userShareSuccess, setUserShareSuccess] = createSignal<string | null>(null);
 
   // ============ CREATE PUBLIC LINK ============
   const createShare = async () => {
@@ -155,6 +167,73 @@ export default function ShareModal(props: ShareModalProps) {
     }
   };
 
+  // ============ SHARE WITH USER ============
+  const shareWithUser = async () => {
+    const username = userShareUsername().trim();
+    setUserShareError('');
+    setUserShareSuccess(null);
+
+    if (!username) {
+      setUserShareError('Please enter a username');
+      return;
+    }
+
+    setUserShareLoading(true);
+    try {
+      const keys = getCurrentKeys();
+      if (!keys) throw new Error('Please login again — keys not found');
+
+      // Look up recipient's RSA-OAEP public key
+      const recipientInfo = await api.getUserPublicKey(username);
+      if (!recipientInfo.encryptionPublicKey) {
+        throw new Error('This user cannot receive shared files (no encryption key)');
+      }
+
+      const myPrivKey = await importEncryptionPrivateKey(keys.encryptionPrivateKey);
+      const recipientPubKey = await importEncryptionPublicKey(recipientInfo.encryptionPublicKey);
+
+      if (props.file.isFolder) {
+        // For folders: share the folder + all descendants
+        const listAllDescendants = async (parentId: string): Promise<FileItem[]> => {
+          const res = await api.listFiles(parentId);
+          const out: FileItem[] = [...res.files];
+          for (const it of res.files) {
+            if (it.isFolder) out.push(...await listAllDescendants(it.id));
+          }
+          return out;
+        };
+
+        const descendants = await listAllDescendants(props.file.id);
+        const allItems = [props.file, ...descendants];
+        let successCount = 0;
+
+        for (const item of allItems) {
+          try {
+            const fileKey = await unwrapKey(item.encryptedKey, myPrivKey);
+            const encryptedKeyForRecipient = await wrapKey(fileKey, recipientPubKey);
+            await api.createUserShare(item.id, username, encryptedKeyForRecipient);
+            successCount++;
+          } catch { /* skip items that fail individually */ }
+        }
+
+        if (successCount === 0) throw new Error('Failed to share any items in this folder');
+        setUserShareSuccess(`Shared "${props.file.filename}" (${successCount} items) with @${username}`);
+      } else {
+        // Single file share
+        const fileKey = await unwrapKey(props.file.encryptedKey, myPrivKey);
+        const encryptedKeyForRecipient = await wrapKey(fileKey, recipientPubKey);
+        await api.createUserShare(props.file.id, username, encryptedKeyForRecipient);
+        setUserShareSuccess(`Shared "${props.file.filename}" with @${username}`);
+      }
+
+      setUserShareUsername('');
+    } catch (err: any) {
+      setUserShareError(err.message || 'Failed to share');
+    } finally {
+      setUserShareLoading(false);
+    }
+  };
+
   return (
     <div
       class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 sv-modal-overlay"
@@ -206,13 +285,100 @@ export default function ShareModal(props: ShareModalProps) {
             </div>
           </div>
 
+          {/* Tab switcher */}
+          <div class="flex gap-1 p-1 bg-gray-700/60 rounded-lg mb-5">
+            <button
+              type="button"
+              onClick={() => { setModalTab('public'); setError(''); }}
+              class={`flex-1 py-1.5 px-3 rounded-md text-sm font-medium transition-all cursor-pointer ${
+                modalTab() === 'public'
+                  ? 'bg-gray-600 text-white'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Public Link
+            </button>
+            <button
+              type="button"
+              onClick={() => { setModalTab('user'); setUserShareError(''); setUserShareSuccess(null); }}
+              class={`flex-1 py-1.5 px-3 rounded-md text-sm font-medium transition-all cursor-pointer ${
+                modalTab() === 'user'
+                  ? 'bg-gray-600 text-white'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Share with User
+            </button>
+          </div>
+
+          {/* ============ USER SHARE TAB ============ */}
+          <Show when={modalTab() === 'user'}>
+            <div class="space-y-4">
+              <Show when={userShareSuccess()}>
+                <div class="flex items-center gap-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-lg p-3 text-sm">
+                  <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  {userShareSuccess()}
+                </div>
+              </Show>
+
+              <Show when={userShareError()}>
+                <div class="bg-red-500/20 border border-red-500/50 text-red-300 rounded-lg p-3 text-sm">
+                  {userShareError()}
+                </div>
+              </Show>
+
+              <div>
+                <label class="block text-gray-400 text-sm mb-2">Recipient username</label>
+                <div class="flex gap-2">
+                  <div class="flex-1 relative">
+                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">@</span>
+                    <input
+                      type="text"
+                      value={userShareUsername()}
+                      onInput={(e) => setUserShareUsername(e.currentTarget.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && !userShareLoading() && shareWithUser()}
+                      placeholder="username"
+                      autocomplete="off"
+                      class="w-full bg-gray-700 border border-gray-600 rounded-lg pl-7 pr-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-primary-500 transition-colors"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={shareWithUser}
+                    disabled={userShareLoading() || !userShareUsername().trim()}
+                    class="px-4 py-3 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg text-white font-medium flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <Show
+                      when={userShareLoading()}
+                      fallback={
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                        </svg>
+                      }
+                    >
+                      <div class="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                    </Show>
+                    Share
+                  </button>
+                </div>
+              </div>
+
+              <p class="text-xs text-gray-500">
+                The file key is encrypted end-to-end with the recipient's public key — the server never sees the plaintext key.
+              </p>
+            </div>
+          </Show>
+
+          {/* ============ PUBLIC LINK MODE ============ */}
+          <Show when={modalTab() === 'public'}>
+
           {error() && (
             <div class="bg-red-500/20 border border-red-500 text-red-300 rounded-lg p-3 mb-4">
               {error()}
             </div>
           )}
-
-          {/* ============ PUBLIC LINK MODE ============ */}
           <Show when={!shareLink()} fallback={
             /* Share link generated */
             <div>
@@ -392,6 +558,7 @@ export default function ShareModal(props: ShareModalProps) {
               )}
             </button>
           </Show>
+          </Show>{/* end modalTab === 'public' */}
         </div>
       </div>
     </div>

@@ -688,6 +688,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     await db.update(schema.users).set({ totpSecret: encryptTotpSecret(secret) }).where(eq(schema.users.id, user.id));
 
+    await logAudit(user.id, user.username, '2FA_SETUP_INITIATED', 'USER', user.id.toString(),
+      undefined, getClientIp(request), request.headers['user-agent']);
+
     return { ok: true, secret, qrCode };
   });
 
@@ -711,6 +714,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       .set({ totpEnabled: true, backupCodes: JSON.stringify(backupCodes) })
       .where(eq(schema.users.id, user.id));
 
+    await logAudit(user.id, user.username, '2FA_ENABLED', 'USER', user.id.toString(),
+      undefined, getClientIp(request), request.headers['user-agent']);
+
     return { ok: true, backupCodes };
   });
 
@@ -732,6 +738,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       .set({ totpEnabled: false, totpSecret: null, backupCodes: null })
       .where(eq(schema.users.id, user.id));
 
+    await logAudit(user.id, user.username, '2FA_DISABLED', 'USER', user.id.toString(),
+      undefined, getClientIp(request), request.headers['user-agent']);
+
     return { ok: true };
   });
 
@@ -750,10 +759,19 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
+  const updateProfileSchema = z.object({
+    displayName: z.string().max(100).optional().nullable(),
+    avatar: z.string().max(512 * 1024).optional().nullable(),
+  });
+
   // ============ UPDATE PROFILE ============
   app.put('/api/profile', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
-    const { displayName, avatar } = request.body as { displayName?: string; avatar?: string };
+    const parsed = updateProfileSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ ok: false, msg: 'Invalid request', errors: parsed.error.errors });
+    }
+    const { displayName, avatar } = parsed.data;
 
     const updates: Record<string, string | null> = {};
 

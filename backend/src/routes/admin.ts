@@ -245,14 +245,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   
   // ============ LIST ALL USERS ============
   app.get('/api/admin/users', { preHandler: requireAdmin }, async (request: AuthenticatedRequest, reply) => {
-    const { page = '1', limit = '20', search = '' } = request.query as { 
-      page?: string; 
+    const { page = '1', limit = '20', search = '' } = request.query as {
+      page?: string;
       limit?: string;
       search?: string;
     };
-    
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
+
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
     const offset = (pageNum - 1) * limitNum;
 
     const searchTrimmed = search.trim();
@@ -417,8 +417,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       username?: string;
     };
 
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(200, Math.max(1, parseInt(limit) || 50));
     const offset = (pageNum - 1) * limitNum;
 
     if (DEMO_MODE) {
@@ -435,13 +435,22 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       };
     }
 
+    const actionTrimmed = action.trim();
+    const usernameTrimmed = username.trim();
+
+    const filters = and(
+      actionTrimmed ? eq(schema.auditLogs.action, actionTrimmed) : undefined,
+      usernameTrimmed ? like(schema.auditLogs.username, `%${usernameTrimmed.replace(/[%_]/g, (c) => `\\${c}`)}%`) : undefined,
+    );
+
     const logs = await db.query.auditLogs.findMany({
+      where: filters,
       orderBy: (logs: any, { desc }: any) => [desc(logs.createdAt)],
       limit: limitNum,
       offset,
     });
-    
-    const [totalResult] = await db.select({ count: count() }).from(schema.auditLogs);
+
+    const [totalResult] = await db.select({ count: count() }).from(schema.auditLogs).where(filters ?? sql`1`);
     const total = totalResult?.count || 0;
     
     return {

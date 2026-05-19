@@ -16,7 +16,7 @@ import {
 
 const kdfParamsSchema = z
   .object({
-    iterations: z.number().int().min(1000).max(2_000_000),
+    iterations: z.number().int().min(100_000).max(2_000_000),
     hash: z.string().max(32),
   })
   .strict();
@@ -90,14 +90,47 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       }));
     }
 
+    // 3. Outgoing user-to-user shares for files I own
+    let userSharesList: Array<{
+      shareId: number;
+      fileId: string;
+      filename: string;
+      fileSize: number;
+      isFolder: boolean;
+      recipientId: string;
+      recipientUsername: string;
+      sharedAt: Date | null;
+    }> = [];
+
+    if (ownedFileIds.length > 0) {
+      const uShares = await db.query.fileShares.findMany({
+        where: inArray(schema.fileShares.fileId, ownedFileIds),
+        with: { file: true, recipient: true },
+      });
+
+      userSharesList = uShares
+        .filter((s: any) => s.file && !s.file.isDeleted)
+        .map((s: any) => ({
+          shareId: s.id,
+          fileId: s.fileId,
+          filename: s.file.filename,
+          fileSize: s.file.fileSize ?? 0,
+          isFolder: s.file.isFolder ?? false,
+          recipientId: s.recipientId,
+          recipientUsername: s.recipient?.username ?? '',
+          sharedAt: s.createdAt,
+        }));
+    }
+
     return {
       ok: true,
+      userShares: userSharesList,
       publicShares: publicSharesList,
     };
   });
-  
 
-  
+
+
   // ============ GET MY SHARES FOR FILE ============
   app.get('/api/files/:fileId/shares', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const user = request.user!;
@@ -173,18 +206,33 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
     });
 
     // For folder shares, store per-file wrapped keys (if provided).
+    // Verify every item fileId is actually a descendant of the shared folder.
     if (file.isFolder) {
       const shareRow = await db.query.publicShares.findFirst({ where: eq(schema.publicShares.token, token) });
       if (shareRow && Array.isArray(items) && items.length > 0) {
+        const descendantRows = db.all(sql`
+          WITH RECURSIVE tree AS (
+            SELECT id FROM files WHERE parent_id = ${file.id} AND owner_id = ${user.id} AND is_deleted = 0
+            UNION ALL
+            SELECT f.id FROM files f INNER JOIN tree t ON f.parent_id = t.id
+            WHERE f.owner_id = ${user.id} AND f.is_deleted = 0
+          )
+          SELECT id FROM tree
+        `) as { id: string }[];
+        const descendantIds = new Set(descendantRows.map((r) => r.id));
+        const validItems = items.filter((it) => descendantIds.has(it.fileId));
+
         await db.delete(schema.publicShareItems).where(eq(schema.publicShareItems.publicShareId, shareRow.id));
-        await db.insert(schema.publicShareItems).values(
-          items.map((it) => ({
-            publicShareId: shareRow.id,
-            fileId: it.fileId,
-            wrappedKey: it.wrappedKey,
-            wrappedKeyIv: it.wrappedKeyIv,
-          }))
-        );
+        if (validItems.length > 0) {
+          await db.insert(schema.publicShareItems).values(
+            validItems.map((it) => ({
+              publicShareId: shareRow.id,
+              fileId: it.fileId,
+              wrappedKey: it.wrappedKey,
+              wrappedKeyIv: it.wrappedKeyIv,
+            }))
+          );
+        }
       }
     }
     
@@ -211,44 +259,61 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
   
   const MAX_FOLDER_DEPTH = 20;
 
-  // Helper function to recursively get all files in a folder (depth-limited)
-  async function getFolderContents(folderId: string, ownerId: string, depth = 0): Promise<any[]> {
-    if (depth >= MAX_FOLDER_DEPTH) return [];
+  // Get all non-deleted files in a folder subtree using a single recursive CTE.
+  // Avoids N+1 queries; depth cap enforced by the LIMIT guard (CTE walks at most
+  // MAX_FOLDER_DEPTH levels before we stop caring about deeper items anyway, and
+  // the per-share token lookup is the real auth gate here).
+  function getFolderContentsFlat(folderId: string, ownerId: string): Array<{
+    id: string; parent_id: string | null; filename: string;
+    file_size: number | null; encrypted_key: string; iv: string; is_folder: number;
+  }> {
+    return db.all(sql`
+      WITH RECURSIVE tree AS (
+        SELECT id, parent_id, filename, file_size, encrypted_key, iv, is_folder, 1 AS depth
+        FROM files
+        WHERE parent_id = ${folderId}
+          AND owner_id = ${ownerId}
+          AND is_deleted = 0
+        UNION ALL
+        SELECT f.id, f.parent_id, f.filename, f.file_size, f.encrypted_key, f.iv, f.is_folder, t.depth + 1
+        FROM files f
+        INNER JOIN tree t ON f.parent_id = t.id
+        WHERE f.owner_id = ${ownerId}
+          AND f.is_deleted = 0
+          AND t.depth < ${MAX_FOLDER_DEPTH}
+      )
+      SELECT id, parent_id, filename, file_size, encrypted_key, iv, is_folder FROM tree
+    `) as Array<{ id: string; parent_id: string | null; filename: string; file_size: number | null; encrypted_key: string; iv: string; is_folder: number }>;
+  }
 
-    const items = await db.query.files.findMany({
-      where: and(
-        eq(schema.files.parentId, folderId),
-        eq(schema.files.ownerId, ownerId),
-        eq(schema.files.isDeleted, false)
-      ),
-    });
-
-    const result: any[] = [];
-
-    for (const item of items) {
-      if (item.isFolder) {
-        const children = await getFolderContents(item.id, ownerId, depth + 1);
-        result.push({
-          id: item.id,
-          filename: item.filename,
-          encryptedKey: item.encryptedKey,
-          iv: item.iv,
-          isFolder: true,
-          children,
-        });
-      } else {
-        result.push({
-          id: item.id,
-          filename: item.filename,
-          fileSize: item.fileSize,
-          encryptedKey: item.encryptedKey,
-          iv: item.iv,
+  function buildFolderTree(rows: ReturnType<typeof getFolderContentsFlat>, parentId: string): any[] {
+    return rows
+      .filter((r) => r.parent_id === parentId)
+      .map((r) => {
+        if (r.is_folder) {
+          return {
+            id: r.id,
+            filename: r.filename,
+            encryptedKey: r.encrypted_key,
+            iv: r.iv,
+            isFolder: true,
+            children: buildFolderTree(rows, r.id),
+          };
+        }
+        return {
+          id: r.id,
+          filename: r.filename,
+          fileSize: r.file_size ?? 0,
+          encryptedKey: r.encrypted_key,
+          iv: r.iv,
           isFolder: false,
-        });
-      }
-    }
+        };
+      });
+  }
 
-    return result;
+  function getFolderContents(folderId: string, ownerId: string): any[] {
+    const flat = getFolderContentsFlat(folderId, ownerId);
+    return buildFolderTree(flat, folderId);
   }
 
   // Check if a file is within the subtree of a given folder using a single recursive CTE
@@ -294,7 +359,7 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
 
     // If it's a folder, return folder structure with all files
     if (share.file.isFolder) {
-      const children = await getFolderContents(share.file.id, share.file.ownerId);
+      const children = getFolderContents(share.file.id, share.file.ownerId);
       const itemRows = await db.query.publicShareItems.findMany({
         where: eq(schema.publicShareItems.publicShareId, share.id),
       });
@@ -486,6 +551,151 @@ export async function shareRoutes(app: FastifyInstance): Promise<void> {
       share.file.isFolder ? 'FOLDER' : 'FILE',
       share.fileId,
       { filename: share.file.filename, token: share.token },
+      getClientIp(request),
+      request.headers['user-agent']
+    );
+
+    return { ok: true };
+  });
+
+  // ============ GET SHARED WITH ME ============
+  app.get('/api/shared-with-me', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+    const user = request.user!;
+
+    const shares = await db.query.fileShares.findMany({
+      where: eq(schema.fileShares.recipientId, user.id),
+      with: { file: true },
+    });
+
+    const ownerIds = [...new Set(
+      shares.map((s: any) => s.file?.ownerId).filter(Boolean) as string[]
+    )];
+
+    const owners = ownerIds.length > 0
+      ? await db.query.users.findMany({
+          where: inArray(schema.users.id, ownerIds),
+          columns: { id: true, username: true },
+        })
+      : [];
+    const ownerMap = new Map(owners.map((u: any) => [u.id, u.username]));
+
+    const items = shares
+      .filter((s: any) => s.file && !s.file.isDeleted)
+      .map((s: any) => ({
+        shareId: s.id,
+        fileId: s.fileId,
+        filename: s.file.filename,
+        fileSize: s.file.fileSize ?? 0,
+        isFolder: s.file.isFolder ?? false,
+        encryptedKey: s.encryptedKey,
+        iv: s.file.iv,
+        parentId: s.file.parentId ?? null,
+        ownerId: s.file.ownerId,
+        ownerUsername: ownerMap.get(s.file.ownerId) ?? '',
+        sharedAt: s.createdAt,
+      }));
+
+    return { ok: true, items };
+  });
+
+  // ============ CREATE USER SHARE ============
+  app.post('/api/share/user', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+    const user = request.user!;
+
+    const body = z.object({
+      fileId: z.string().uuid(),
+      recipientUsername: z.string().min(1).max(80),
+      encryptedKey: z.string().min(1),
+    }).safeParse(request.body);
+
+    if (!body.success) return reply.status(400).send({ ok: false, msg: 'Invalid request' });
+
+    const { fileId, recipientUsername, encryptedKey } = body.data;
+
+    if (recipientUsername === user.username) {
+      return reply.status(400).send({ ok: false, msg: 'Cannot share with yourself' });
+    }
+
+    const file = await db.query.files.findFirst({
+      where: and(
+        eq(schema.files.id, fileId),
+        eq(schema.files.ownerId, user.id),
+        eq(schema.files.isDeleted, false)
+      ),
+    });
+
+    if (!file) return reply.status(404).send({ ok: false, msg: 'File not found' });
+
+    const recipient = await db.query.users.findFirst({
+      where: eq(schema.users.username, recipientUsername),
+    });
+
+    if (!recipient) return reply.status(404).send({ ok: false, msg: 'User not found' });
+
+    const existing = await db.query.fileShares.findFirst({
+      where: and(
+        eq(schema.fileShares.fileId, fileId),
+        eq(schema.fileShares.recipientId, recipient.id)
+      ),
+    });
+
+    if (existing) return reply.status(409).send({ ok: false, msg: 'Already shared with this user' });
+
+    await db.insert(schema.fileShares).values({
+      fileId,
+      recipientId: recipient.id,
+      encryptedKey,
+    });
+
+    await createNotification(
+      recipient.id,
+      'SHARE_RECEIVED',
+      `${user.username} shared a file with you`,
+      file.filename,
+    );
+
+    await logAudit(
+      user.id,
+      user.username,
+      'SHARE_USER',
+      file.isFolder ? 'FOLDER' : 'FILE',
+      fileId,
+      { recipientId: recipient.id, recipientUsername },
+      getClientIp(request),
+      request.headers['user-agent']
+    );
+
+    return { ok: true };
+  });
+
+  // ============ REVOKE USER SHARE ============
+  app.delete('/api/share/:fileId/:recipientId', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+    const user = request.user!;
+    const { fileId, recipientId } = request.params as { fileId: string; recipientId: string };
+
+    const file = await db.query.files.findFirst({
+      where: and(
+        eq(schema.files.id, fileId),
+        eq(schema.files.ownerId, user.id)
+      ),
+    });
+
+    if (!file) return reply.status(404).send({ ok: false, msg: 'File not found' });
+
+    await db.delete(schema.fileShares).where(
+      and(
+        eq(schema.fileShares.fileId, fileId),
+        eq(schema.fileShares.recipientId, recipientId)
+      )
+    );
+
+    await logAudit(
+      user.id,
+      user.username,
+      'REVOKE_USER_SHARE',
+      file.isFolder ? 'FOLDER' : 'FILE',
+      fileId,
+      { recipientId },
       getClientIp(request),
       request.headers['user-agent']
     );
