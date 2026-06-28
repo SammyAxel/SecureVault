@@ -29,6 +29,7 @@ import Sidebar from './components/Sidebar';
 import MobileNavDrawer from './components/MobileNavDrawer';
 import ProfileSection from './components/ProfileDropdown';
 import Home from './components/Home';
+import ShareModal from './components/ShareModal';
 import DemoBanner from './components/DemoBanner';
 import DemoTour, { shouldAutoStartTour } from './components/DemoTour';
 import * as api from './lib/api';
@@ -81,6 +82,7 @@ function AppContent() {
   const [demoUsername, setDemoUsername] = createSignal<string | undefined>();
   const [tourActive, setTourActive] = createSignal(false);
   const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
+  const [shareFile, setShareFile] = createSignal<FileItem | null>(null);
 
   const driveShellOpen = () => !!user() && !isAdminPage() && !isProfilePage();
 
@@ -160,7 +162,7 @@ function AppContent() {
   });
 
   // Check if we're on admin page
-  const isAdminPage = () => path() === ROUTES.admin;
+  const isAdminPage = () => path().startsWith('/admin');
 
   // Check if we're on profile page
   const isProfilePage = () => path() === ROUTES.profile;
@@ -249,6 +251,17 @@ function AppContent() {
     const p = path();
     if (isProtectedVaultPath(p)) {
       navigate(ROUTES.login);
+    }
+  });
+
+  // When logged in but not admin and trying to access admin page, redirect to home
+  createEffect(() => {
+    if (checkingSetup() || needsSetup()) return;
+    if (isLoading()) return;
+    const u = user();
+    if (!u) return;
+    if (isAdminPage() && !u.isAdmin) {
+      navigate(ROUTES.home);
     }
   });
 
@@ -726,6 +739,7 @@ function AppContent() {
                             }
                           }}
                           onDownloadFile={() => {}}
+                          onShareFile={setShareFile}
                         />
                       </Show>
                     </div>
@@ -740,6 +754,9 @@ function AppContent() {
             <DemoTour active={tourActive()} onClose={() => setTourActive(false)} />
           </Show>
           <KeyboardShortcutsModal open={shortcutsOpen()} onClose={() => setShortcutsOpen(false)} />
+          <Show when={shareFile()}>
+            <ShareModal file={shareFile()!} onClose={() => setShareFile(null)} />
+          </Show>
         </div>
       </Show>
     </>

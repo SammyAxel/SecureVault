@@ -13,7 +13,13 @@ type TabType = 'overview' | 'users' | 'audit' | 'settings';
 export default function AdminDashboard() {
   const { user } = useAuth();
   const isDemo = () => user()?.demoMode === true;
-  const [activeTab, setActiveTab] = createSignal<TabType>('overview');
+  const initialTab = () => {
+    if (typeof window !== 'undefined' && window.location.pathname === '/admin/users') {
+      return 'users';
+    }
+    return 'overview';
+  };
+  const [activeTab, setActiveTab] = createSignal<TabType>(initialTab());
   const [tabVisible, setTabVisible] = createSignal(true);
   let tabTimeout: ReturnType<typeof setTimeout> | undefined;
 

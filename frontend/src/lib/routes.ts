@@ -81,7 +81,7 @@ export const SEARCH_QUERY_KEY = 'q';
 
 /** True for views that show the vault header search (synced to `?q=`). */
 export function isDriveShellPath(pathname: string): boolean {
-  if (pathname === ROUTES.admin || pathname === ROUTES.profile) return false;
+  if (pathname.startsWith('/admin') || pathname === ROUTES.profile) return false;
   if (pathname === ROUTES.login || pathname === ROUTES.loginLink || pathname === ROUTES.register) return false;
   if (pathname.startsWith('/share/')) return false;
   if (
@@ -150,7 +150,7 @@ export function isProtectedVaultPath(pathname: string): boolean {
   }
   if (pathname === ROUTES.shared || pathname === ROUTES.sharedSearch) return true;
   if (pathname === ROUTES.trash || pathname === ROUTES.trashSearch) return true;
-  if (pathname === ROUTES.admin || pathname === ROUTES.profile) return true;
+  if (pathname.startsWith('/admin') || pathname === ROUTES.profile) return true;
   return false;
 }
 

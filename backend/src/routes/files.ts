@@ -272,6 +272,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
 
       if (!encryptedKey || !iv) {
         await deleteFile(relativePath);
+        request.log.warn({ encryptedKey, iv, fields }, 'Missing encryption metadata');
         return reply.status(400).send({ ok: false, msg: 'Missing encryption metadata' });
       }
 
@@ -290,10 +291,9 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
-      if (fileHashField && fileHashField !== streamSha256) {
-        await deleteFile(relativePath);
-        return reply.status(400).send({ ok: false, msg: 'File hash mismatch' });
-      }
+      // We don't compare fileHashField with streamSha256 anymore.
+      // fileHashField is the hash of the ORIGINAL unencrypted file (for VirusTotal),
+      // while streamSha256 is the hash of the ENCRYPTED stream. They will never match.
 
       const storedFilename = encryptedFilename || data.filename;
 

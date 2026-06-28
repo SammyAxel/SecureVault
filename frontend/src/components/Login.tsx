@@ -171,7 +171,7 @@ export default function Login(props: LoginProps) {
         </div>
 
         {error() && (
-          <div class="bg-red-500/10 border border-red-500/40 text-red-300 rounded-xl p-3 mb-5 flex items-start gap-2">
+          <div role="alert" class="bg-red-500/10 border border-red-500/40 text-red-300 rounded-xl p-3 mb-5 flex items-start gap-2">
             <svg class="w-4 h-4 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
@@ -190,7 +190,7 @@ export default function Login(props: LoginProps) {
               value={username()}
               onInput={(e) => setUsername(e.currentTarget.value)}
               class="w-full bg-gray-700/60 border border-gray-600 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/60 focus:border-primary-500/60 placeholder-gray-500"
-              placeholder="Enter your username"
+              placeholder="Username"
               autocomplete="username"
               required
               disabled={requires2FA() && !!challengeData()}

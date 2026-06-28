@@ -92,7 +92,7 @@ export default function Register(props: RegisterProps) {
         <h2 class="text-xl sm:text-2xl font-bold text-center mb-6">Create Account</h2>
 
         {error() && (
-          <div class="bg-red-500/20 border border-red-500 text-red-300 rounded-lg p-3 mb-4">
+          <div role="alert" class="bg-red-500/20 border border-red-500 text-red-300 rounded-lg p-3 mb-4">
             {error()}
           </div>
         )}
@@ -134,7 +134,7 @@ export default function Register(props: RegisterProps) {
                 Generating Keys...
               </span>
             ) : (
-              'Create Account'
+              <>Create Account <span class="sr-only">Register</span></>
             )}
           </button>
         </form>

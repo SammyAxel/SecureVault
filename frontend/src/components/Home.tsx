@@ -19,6 +19,7 @@ export default function Home(props: {
   onOpenFolder: (folderId: string, folderName: string, folderUid?: string | null) => void;
   onOpenFile: (file: FileItem) => void;
   onDownloadFile: (file: FileItem) => void;
+  onShareFile?: (file: FileItem) => void;
 }) {
   const [files, setFiles] = createSignal<FileItem[]>([]);
   const [isLoading, setIsLoading] = createSignal(true);
@@ -97,7 +98,7 @@ export default function Home(props: {
     !!props.search.trim() && visible().length === 0 && files().length > 0;
 
   return (
-    <div class="pb-20">
+    <div class="pb-20 file-list">
       <div class="flex items-center justify-between mb-4 sm:mb-6">
         <div class="min-w-0">
           <h2 class="text-lg sm:text-xl font-semibold text-white truncate">Home</h2>
@@ -240,6 +241,14 @@ export default function Home(props: {
                       </div>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        class="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg text-sm"
+                        onClick={() => props.onShareFile?.(f)}
+                        title="Share"
+                      >
+                        Share
+                      </button>
                       <button
                         type="button"
                         class="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg text-sm"

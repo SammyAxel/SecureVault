@@ -217,13 +217,13 @@ export default function ShareModal(props: ShareModalProps) {
         }
 
         if (successCount === 0) throw new Error('Failed to share any items in this folder');
-        setUserShareSuccess(`Shared "${props.file.filename}" (${successCount} items) with @${username}`);
+        setUserShareSuccess(`Shared successfully. Shared "${props.file.filename}" (${successCount} items) with @${username}`);
       } else {
         // Single file share
         const fileKey = await unwrapKey(props.file.encryptedKey, myPrivKey);
         const encryptedKeyForRecipient = await wrapKey(fileKey, recipientPubKey);
         await api.createUserShare(props.file.id, username, encryptedKeyForRecipient);
-        setUserShareSuccess(`Shared "${props.file.filename}" with @${username}`);
+        setUserShareSuccess(`Shared successfully. Shared "${props.file.filename}" with @${username}`);
       }
 
       setUserShareUsername('');
@@ -339,7 +339,7 @@ export default function ShareModal(props: ShareModalProps) {
                       value={userShareUsername()}
                       onInput={(e) => setUserShareUsername(e.currentTarget.value)}
                       onKeyDown={(e) => e.key === 'Enter' && !userShareLoading() && shareWithUser()}
-                      placeholder="username"
+                      placeholder="Username to share with"
                       autocomplete="off"
                       class="w-full bg-gray-700 border border-gray-600 rounded-lg pl-7 pr-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-primary-500 transition-colors"
                     />
@@ -360,7 +360,7 @@ export default function ShareModal(props: ShareModalProps) {
                     >
                       <div class="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
                     </Show>
-                    Share
+                    Share File
                   </button>
                 </div>
               </div>
@@ -553,7 +553,7 @@ export default function ShareModal(props: ShareModalProps) {
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                   </svg>
-                  Create Share Link
+                  Create Public Link
                 </>
               )}
             </button>

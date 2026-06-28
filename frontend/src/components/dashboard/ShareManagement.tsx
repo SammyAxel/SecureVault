@@ -1,4 +1,5 @@
 import { createSignal, createEffect, For, Show, createMemo, onCleanup } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import * as api from '../../lib/api';
 import type { PublicShareItem, UserShareItem, SharedWithMeItem } from '../../lib/api';
 import { formatSize } from '../../lib/format';
@@ -7,7 +8,8 @@ import { toast } from '../../stores/toast';
 import { openConfirm } from '../../stores/confirm';
 import { logger } from '../../lib/logger';
 import { saveBlobToDevice } from '../../lib/downloadBlob';
-import { getPreviewMimeType, isPreviewableFile } from '../FilePreview';
+import { getPreviewMimeType, isPreviewableFile, CsvPreview, ExcelPreview, WordPreview } from '../FilePreview';
+import DashboardTextPreview from './DashboardTextPreview';
 import {
   getCurrentKeys,
   importEncryptionPrivateKey,
@@ -661,12 +663,13 @@ export default function ShareManagement() {
                         type="button"
                         onClick={() => handleDeletePublicLink(share)}
                         class="p-2 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer"
-                        title="Delete link"
-                        aria-label="Delete link"
+                        title="Revoke Link"
+                        aria-label="Revoke Link"
                       >
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                         </svg>
+                        <span class="sr-only">Revoke Link</span>
                       </button>
                     </div>
                   </div>
@@ -678,71 +681,100 @@ export default function ShareManagement() {
       </Show>
 
       {/* ═════════════════════════ PREVIEW MODAL ═════════════════════════════ */}
-      <Show when={previewState()}>
-        {(p) => (
-          <div
-            class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
-            onClick={closePreview}
-          >
-            <div class="relative max-w-4xl w-full mx-4" onClick={(e) => e.stopPropagation()}>
-              <div class="flex items-center justify-between mb-2 px-1">
-                <span class="text-sm font-medium text-white truncate max-w-xs">{p().filename}</span>
-                <div class="flex items-center gap-1.5">
-                  <a
-                    href={p().url}
-                    download={p().filename}
-                    class="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700/80 transition-colors cursor-pointer"
-                    title="Download"
-                    aria-label="Download"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                  </a>
-                  <button
-                    type="button"
-                    onClick={closePreview}
-                    class="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700/80 transition-colors cursor-pointer"
-                    aria-label="Close preview"
-                  >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
+      {/* ═════════════════════════ PREVIEW MODAL ═════════════════════════════ */}
+      <Portal>
+        <Show when={previewState()}>
+          {(p) => (
+            <div
+              class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-2 sm:p-4 sv-modal-overlay"
+              onClick={closePreview}
+            >
+              <div
+                class="bg-gray-800 rounded-xl max-w-5xl max-h-[calc(100vh-2rem)] w-full overflow-hidden sv-modal-panel"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Modal Header */}
+                <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+                  <h3 class="text-lg font-medium text-white truncate">{p().filename}</h3>
+                  <div class="flex items-center gap-2">
+                    <a
+                      href={p().url}
+                      download={p().filename}
+                      class="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-700 transition-colors"
+                      title="Download"
+                      aria-label="Download"
+                    >
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                    </a>
+                    <button
+                      onClick={closePreview}
+                      class="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-700 transition-colors"
+                      aria-label="Close preview"
+                    >
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                
+                {/* Modal Content */}
+                <div class="p-4 overflow-auto max-h-[calc(90vh-60px)]">
+                  {/* Image Preview */}
+                  <Show when={p().mimeType.startsWith('image/')}>
+                    <img src={p().url} alt={p().filename} class="max-w-full max-h-[70vh] mx-auto rounded-lg" />
+                  </Show>
+
+                  {/* Video Preview */}
+                  <Show when={p().mimeType.startsWith('video/')}>
+                    <video src={p().url} controls class="max-w-full max-h-[70vh] mx-auto rounded-lg" />
+                  </Show>
+
+                  {/* Audio Preview */}
+                  <Show when={p().mimeType.startsWith('audio/')}>
+                    <div class="flex flex-col items-center gap-4 py-8">
+                      <svg class="w-24 h-24 text-gray-500" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                      </svg>
+                      <audio src={p().url} controls class="w-full max-w-md" />
+                    </div>
+                  </Show>
+
+                  {/* PDF Preview */}
+                  <Show when={p().mimeType === 'application/pdf'}>
+                    <iframe src={p().url} class="w-full h-[70vh] rounded-lg bg-white" title={p().filename} />
+                  </Show>
+
+                  {/* CSV Preview */}
+                  <Show when={p().mimeType === 'text/csv'}>
+                    <CsvPreview url={p().url} />
+                  </Show>
+
+                  {/* Excel Preview */}
+                  <Show when={p().mimeType.includes('spreadsheet') || p().mimeType.includes('excel')}>
+                    <ExcelPreview url={p().url} />
+                  </Show>
+
+                  {/* Word Preview */}
+                  <Show when={p().mimeType.includes('wordprocessingml') || p().mimeType === 'application/msword'}>
+                    <WordPreview url={p().url} />
+                  </Show>
+
+                  {/* Text/Code Preview */}
+                  <Show when={
+                    (p().mimeType.startsWith('text/') && p().mimeType !== 'text/csv') || 
+                    p().mimeType === 'application/json'
+                  }>
+                    <DashboardTextPreview url={p().url} />
+                  </Show>
                 </div>
               </div>
-              <div class="bg-gray-900 rounded-xl overflow-hidden flex items-center justify-center max-h-[82vh]">
-                <Show
-                  when={p().mimeType.startsWith('image/')}
-                  fallback={
-                    <Show
-                      when={p().mimeType.startsWith('video/')}
-                      fallback={
-                        <Show
-                          when={p().mimeType === 'application/pdf'}
-                          fallback={
-                            <div class="p-10 text-center text-gray-400">
-                              <p class="text-sm">Preview not supported.</p>
-                              <p class="text-xs text-gray-500 mt-1">Use the download button above.</p>
-                            </div>
-                          }
-                        >
-                          <iframe src={p().url} class="w-full h-[80vh]" title={p().filename} />
-                        </Show>
-                      }
-                    >
-                      <video src={p().url} controls class="max-w-full max-h-[80vh]" />
-                    </Show>
-                  }
-                >
-                  <img src={p().url} alt={p().filename} class="max-w-full max-h-[80vh] object-contain" />
-                </Show>
-              </div>
             </div>
-          </div>
-        )}
-      </Show>
+          )}
+        </Show>
+      </Portal>
     </div>
   );
 }
