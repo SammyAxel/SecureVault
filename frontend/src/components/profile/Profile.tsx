@@ -565,7 +565,6 @@ function SecurityTab() {
     try {
       const result = await api.confirm2FA(totpCode());
       setBackupCodes(result.backupCodes);
-      updateUser({ totpEnabled: true });
       toast.success('2FA enabled successfully!');
     } catch (err: any) {
       toast.error(err.message || 'Invalid code');
@@ -754,6 +753,7 @@ function SecurityTab() {
               </div>
               <button
                 onClick={() => {
+                  updateUser({ totpEnabled: true });
                   setShow2FASetup(false);
                   setBackupCodes([]);
                 }}

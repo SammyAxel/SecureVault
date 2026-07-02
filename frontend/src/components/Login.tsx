@@ -231,13 +231,12 @@ export default function Login(props: LoginProps) {
                 <input
                   id="login-totp"
                   type="text"
-                  inputmode="numeric"
                   autocomplete="one-time-code"
                   value={totp()}
                   onInput={(e) => setTotp(e.currentTarget.value)}
-                  class="w-full bg-gray-700/60 border border-gray-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-primary-500/60 focus:border-primary-500/60 text-center text-2xl tracking-[0.4em] font-mono"
+                  class="w-full bg-gray-700/60 border border-gray-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-primary-500/60 focus:border-primary-500/60 text-center text-2xl tracking-[0.2em] font-mono uppercase"
                   placeholder="000000"
-                  maxLength={6}
+                  maxLength={8}
                   required
                 />
               </div>
